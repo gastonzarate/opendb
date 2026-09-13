@@ -45,6 +45,13 @@ Web: [localhost:8000](http://localhost:8000). Correo de desarrollo:
 PostgreSQL personal, embeddings y el worker. El servicio MCP usa un perfil separado
 y requiere configurar OAuth antes de activarlo; el login web también usa Google.
 
+## Interfaz gráfica
+
+Abrí [localhost:8000/app/](http://localhost:8000/app/). Incluye explorador de tablas y
+vistas, esquema, consultas SQL, roles/invitados y estado vectorial. El build de React
+se genera automáticamente al levantar Compose. Detalles y pruebas en
+[la guía de interfaz](docs/implementation/web.md).
+
 ## Google y MCP
 
 Configura un cliente OAuth de Google de tipo **Aplicación web** y su pantalla de

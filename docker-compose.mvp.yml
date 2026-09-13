@@ -9,6 +9,16 @@ x-opendb-env: &opendb-env
   DJANGO_SETTINGS_MODULE: config.settings.local
 
 services:
+  frontend-build:
+    image: node:24-bookworm-slim
+    working_dir: /workspace/frontend
+    user: "1000:1000"
+    environment:
+      npm_config_cache: /tmp/npm-cache
+    volumes:
+      - .:/workspace
+    command: sh -c "npm ci --no-fund --no-audit && npm run build"
+
   django:
     environment: *opendb-env
     healthcheck:
@@ -17,6 +27,8 @@ services:
       timeout: 5s
       retries: 40
     depends_on:
+      frontend-build:
+        condition: service_completed_successfully
       data-postgres:
         condition: service_healthy
 

@@ -40,12 +40,23 @@ INSTALLED_APPS = ["whitenoise.runserver_nostatic", *INSTALLED_APPS]
 
 # django-debug-toolbar
 # ------------------------------------------------------------------------------
+def show_toolbar(request):
+    """Keep the toolbar out of the SPA and retain its default checks elsewhere."""
+    if request.path_info == "/" or request.path_info.startswith(("/app/", "/api/")):
+        return False
+
+    from debug_toolbar import middleware  # noqa: PLC0415
+
+    return middleware.show_toolbar(request)
+
+
 # https://django-debug-toolbar.readthedocs.io/en/latest/installation.html#prerequisites
 INSTALLED_APPS += ["debug_toolbar"]
 # https://django-debug-toolbar.readthedocs.io/en/latest/installation.html#middleware
 MIDDLEWARE += ["debug_toolbar.middleware.DebugToolbarMiddleware"]
 # https://django-debug-toolbar.readthedocs.io/en/latest/configuration.html#debug-toolbar-config
 DEBUG_TOOLBAR_CONFIG = {
+    "SHOW_TOOLBAR_CALLBACK": "config.settings.local.show_toolbar",
     "DISABLE_PANELS": [
         "debug_toolbar.panels.redirects.RedirectsPanel",
         # Disable profiling panel due to an issue with Python 3.12+:

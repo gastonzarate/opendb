@@ -73,3 +73,20 @@ jobs:
       - name: Tear down disposable test PostgreSQL
         if: ${{ always() }}
         run: docker compose -f docker-compose.test.yml down --volumes
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-fund --no-audit
+      - run: npm run format:check
+      - run: npm test
+      - run: npm run build
