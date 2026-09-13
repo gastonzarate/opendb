@@ -1,0 +1,42 @@
+#!/usr/bin/env python3
+"""Create missing local configuration; preserve existing credentials."""
+
+import base64
+import os
+import secrets
+from pathlib import Path
+
+root = Path(__file__).resolve().parent.parent
+local = root / ".envs" / ".local"
+local.mkdir(parents=True, exist_ok=True)
+for name in ("django", "postgres"):
+    destination = local / ("." + name)
+    if not destination.exists():
+        destination.write_text((root / "env.example" / name).read_text())
+        destination.chmod(0o600)
+p = local / ".django"
+lines = p.read_text().splitlines()
+values = {
+    line.split("=", 1)[0]: line.split("=", 1)[1]
+    for line in lines
+    if "=" in line and not line.startswith("#")
+}
+for key in (
+    "OPENDB_DB_CREDENTIAL_KEY",
+    "OPENDB_MCP_JWT_SIGNING_KEY",
+    "OPENDB_MCP_STORAGE_ENCRYPTION_KEY",
+):
+    if not values.get(key):
+        value = (
+            base64.urlsafe_b64encode(os.urandom(32)).decode()
+            if key.endswith("ENCRYPTION_KEY")
+            else secrets.token_hex(32)
+        )
+        lines = [line for line in lines if not line.startswith(key + "=")]
+        lines.append(key + "=" + value)
+p.write_text("\n".join(lines) + "\n")
+p.chmod(0o600)
+print(  # noqa: T201 -- Local CLI status; contains no secret values.
+    "Local configuration ready. Set Google OAuth credentials "
+    "in .envs/.local/.django to enable login and MCP."
+)

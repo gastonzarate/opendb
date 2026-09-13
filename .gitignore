@@ -274,3 +274,6 @@ opendb/media/
 .ipython/
 .env
 .envs/*
+
+.superpowers/
+.models/

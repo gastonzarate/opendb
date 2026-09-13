@@ -1,2 +1,12 @@
 USE_DOCKER=yes
 IPYTHONDIR=/app/.ipython
+
+# Generate unique values once with scripts/setup-local; keep them private.
+OPENDB_DB_CREDENTIAL_KEY=
+OPENDB_GOOGLE_CLIENT_ID=
+OPENDB_GOOGLE_CLIENT_SECRET=
+OPENDB_MCP_BASE_URL=http://localhost:8001
+OPENDB_MCP_JWT_SIGNING_KEY=
+OPENDB_MCP_STORAGE_ENCRYPTION_KEY=
+OPENDB_MCP_STATE_DIRECTORY=/state/oauth
+OPENDB_MCP_ALLOWED_CLIENT_REDIRECT_URIS=http://localhost:*/*,http://127.0.0.1:*/*

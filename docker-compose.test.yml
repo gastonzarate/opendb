@@ -1,0 +1,17 @@
+services:
+  test-postgres:
+    image: pgvector/pgvector:0.8.2-pg17
+    environment:
+      POSTGRES_USER: opendb_test
+      POSTGRES_PASSWORD: opendb_test
+      POSTGRES_DB: opendb_test
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+    ports:
+      - '127.0.0.1:55439:5432'
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U opendb_test']
+      interval: 1s
+      timeout: 3s
+      retries: 30

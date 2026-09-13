@@ -32,69 +32,44 @@ jobs:
       - name: Run pre-commit
         uses: pre-commit/action@v3.0.1
 
-  # With no caching at all the entire ci process takes 3m to complete!
   pytest:
     runs-on: ubuntu-latest
+    env:
+      DJANGO_SETTINGS_MODULE: config.settings.integration
+      COMPOSE_PROJECT_NAME: opendb-ci-test
+      # The real-model smoke test requires an explicitly configured local server.
+      OPENDB_REAL_EMBEDDINGS_URL: ''
 
     steps:
       - name: Checkout Code Repository
         uses: actions/checkout@v6
 
-      # When keep_local_envs_in_vcs is off, .envs/.local/* are not in the repo.
-      # Create minimal dummy files so Docker Compose / Django / Postgres work in CI.
-      - name: Ensure local env files exist for Docker Compose
-        run: |
-          mkdir -p .envs/.local
-          if [ ! -f .envs/.local/.django ]; then
-            cat <<'EOF' > .envs/.local/.django
-          USE_DOCKER=yes
-          IPYTHONDIR=/app/.ipython
-          EOF
-          fi
-          if [ ! -f .envs/.local/.postgres ]; then
-            cat <<'EOF' > .envs/.local/.postgres
-          POSTGRES_HOST=postgres
-          POSTGRES_PORT=5432
-          POSTGRES_DB=ci
-          POSTGRES_USER=debug
-          POSTGRES_PASSWORD=debug
-          EOF
-          fi
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and cache local backend
-        uses: docker/bake-action@v6
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
-          push: false
-          load: true
-          files: docker-compose.local.yml
-          targets: django
-          set: |
-            django.cache-from=type=gha,scope=django-cached-tests
-            django.cache-to=type=gha,scope=django-cached-tests,mode=max
-            postgres.cache-from=type=gha,scope=postgres-cached-tests
-            postgres.cache-to=type=gha,scope=postgres-cached-tests,mode=max
+          enable-cache: true
 
-      - name: Build and cache docs
-        uses: docker/bake-action@v6
-        with:
-          push: false
-          load: true
-          files: docker-compose.docs.yml
-          set: |
-            docs.cache-from=type=gha,scope=cached-docs
-            docs.cache-to=type=gha,scope=cached-docs,mode=max
+      - name: Install pinned Python
+        run: uv python install
+
+      - name: Install locked dependencies
+        run: uv sync --frozen
+
+      - name: Start disposable test PostgreSQL
+        run: docker compose -f docker-compose.test.yml up -d --wait
+
+      - name: Check Django configuration
+        run: uv run --frozen python manage.py check
 
       - name: Check DB Migrations
-        run: docker compose -f docker-compose.local.yml run --rm django python manage.py makemigrations --check
+        run: uv run --frozen python manage.py makemigrations --check --dry-run
 
       - name: Run DB Migrations
-        run: docker compose -f docker-compose.local.yml run --rm django python manage.py migrate
+        run: uv run --frozen python manage.py migrate --noinput
 
       - name: Run Django Tests
-        run: docker compose -f docker-compose.local.yml run django pytest
+        run: uv run --frozen pytest --ds=config.settings.integration -p no:cacheprovider
 
-      - name: Tear down the Stack
-        run: docker compose -f docker-compose.local.yml down
+      - name: Tear down disposable test PostgreSQL
+        if: ${{ always() }}
+        run: docker compose -f docker-compose.test.yml down --volumes

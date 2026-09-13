@@ -1,0 +1,157 @@
+{
+  "version": 1,
+  "idempotency_key": "example-transcript-1",
+  "expected_schema_fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+  "source": {
+    "content": "Unknown speaker: Hello.\n[00:03] Alice: Welcome.",
+    "media_type": "text/plain"
+  },
+  "statements": [
+    "CREATE TABLE data.meetings (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, title text, held_on date, timezone text)",
+    "CREATE TABLE data.people (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, external_identity text UNIQUE, name text)",
+    "CREATE TABLE data.participants (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, meeting_id bigint NOT NULL REFERENCES data.meetings(id), person_id bigint REFERENCES data.people(id), label text NOT NULL, UNIQUE (meeting_id, id))",
+    "CREATE TABLE data.turns (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, meeting_id bigint NOT NULL REFERENCES data.meetings(id), participant_id bigint NOT NULL, ordinal integer NOT NULL CHECK (ordinal > 0), body text NOT NULL, starts_at numeric(12,3), ends_at numeric(12,3), UNIQUE (meeting_id, ordinal), FOREIGN KEY (meeting_id, participant_id) REFERENCES data.participants(meeting_id, id))"
+  ],
+  "records": [
+    {
+      "ref": "meeting",
+      "table": "meetings",
+      "values": {
+        "title": {
+          "type": "text",
+          "value": null
+        },
+        "held_on": {
+          "type": "date",
+          "value": null
+        },
+        "timezone": {
+          "type": "text",
+          "value": null
+        }
+      },
+      "returning": [
+        "id"
+      ]
+    },
+    {
+      "ref": "unknown",
+      "table": "participants",
+      "values": {
+        "meeting_id": {
+          "$ref": "meeting.id"
+        },
+        "person_id": {
+          "type": "integer",
+          "value": null
+        },
+        "label": {
+          "type": "text",
+          "value": "Unknown speaker"
+        }
+      },
+      "returning": [
+        "id"
+      ]
+    },
+    {
+      "ref": "alice",
+      "table": "participants",
+      "values": {
+        "meeting_id": {
+          "$ref": "meeting.id"
+        },
+        "person_id": {
+          "type": "integer",
+          "value": null
+        },
+        "label": {
+          "type": "text",
+          "value": "Alice"
+        }
+      },
+      "returning": [
+        "id"
+      ]
+    },
+    {
+      "ref": "first_turn",
+      "table": "turns",
+      "values": {
+        "meeting_id": {
+          "$ref": "meeting.id"
+        },
+        "participant_id": {
+          "$ref": "unknown.id"
+        },
+        "ordinal": {
+          "type": "integer",
+          "value": 1
+        },
+        "body": {
+          "type": "text",
+          "value": "Hello."
+        },
+        "starts_at": {
+          "type": "numeric",
+          "value": null
+        },
+        "ends_at": {
+          "type": "numeric",
+          "value": null
+        }
+      },
+      "returning": [
+        "id"
+      ]
+    },
+    {
+      "ref": "second_turn",
+      "table": "turns",
+      "values": {
+        "meeting_id": {
+          "$ref": "meeting.id"
+        },
+        "participant_id": {
+          "$ref": "alice.id"
+        },
+        "ordinal": {
+          "type": "integer",
+          "value": 2
+        },
+        "body": {
+          "type": "text",
+          "value": "Welcome."
+        },
+        "starts_at": {
+          "type": "numeric",
+          "value": "3.000"
+        },
+        "ends_at": {
+          "type": "numeric",
+          "value": null
+        }
+      },
+      "returning": [
+        "id"
+      ]
+    }
+  ],
+  "annotations": [
+    {
+      "table": "participants",
+      "description": "Speaker labels within a meeting; labels are not verified identities.",
+      "metadata": {
+        "conventions": "Reuse a person only after matching a verified external identity. Keep person_id NULL otherwise."
+      }
+    },
+    {
+      "table": "turns",
+      "description": "Ordered verbatim utterances linked to the meeting and its participants.",
+      "metadata": {
+        "units": "seconds from recording start",
+        "conventions": "ordinal is global within a meeting. Missing dates, timestamps and identities remain NULL."
+      }
+    }
+  ]
+}

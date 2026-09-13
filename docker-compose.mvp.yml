@@ -1,0 +1,87 @@
+# Local MVP extension: combine with docker-compose.local.yml.
+volumes:
+  personal_data: {}
+  mcp_state: {}
+
+x-opendb-env: &opendb-env
+  OPENDB_ADMIN_DSN: postgres://opendb_admin:local-personal-only@data-postgres:5432/postgres
+  OPENDB_EMBEDDING_URL: http://embeddings:8080
+  DJANGO_SETTINGS_MODULE: config.settings.local
+
+services:
+  django:
+    environment: *opendb-env
+    healthcheck:
+      test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=3)"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+    depends_on:
+      data-postgres:
+        condition: service_healthy
+
+  data-postgres:
+    image: pgvector/pgvector:0.8.2-pg17
+    environment:
+      POSTGRES_USER: opendb_admin
+      POSTGRES_PASSWORD: local-personal-only
+      POSTGRES_DB: postgres
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+    volumes:
+      - personal_data:/var/lib/postgresql/data
+      - ./compose/local/postgres-personal-init.sh:/docker-entrypoint-initdb.d/10-private.sh:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U opendb_admin']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  embeddings:
+    image: ghcr.io/ggml-org/llama.cpp@sha256:cbcdcb52d484e08e23bfc0135afa5beadd2d540513bbb7c65b233231fa033ff4
+    volumes:
+      - ./.models:/models:ro
+    command: ['-m', '/models/granite-97m-r2-q8_0.gguf', '--embeddings', '--pooling', 'mean', '-c', '512', '-t', '4', '--host', '0.0.0.0', '--port', '8080']
+
+  mcp:
+    profiles: ['mcp']
+    image: opendb_local_django
+    build:
+      context: .
+      dockerfile: ./compose/local/django/Dockerfile
+    volumes:
+      - /app/.venv
+      - .:/app:z
+      - mcp_state:/state
+    env_file:
+      - ./.envs/.local/.django
+      - ./.envs/.local/.postgres
+    environment: *opendb-env
+    command: python -m opendb.gateway --host 0.0.0.0 --port 8001
+    ports:
+      - '127.0.0.1:8001:8001'
+    depends_on:
+      data-postgres:
+        condition: service_healthy
+      django:
+        condition: service_healthy
+
+  indexer:
+    image: opendb_local_django
+    build:
+      context: .
+      dockerfile: ./compose/local/django/Dockerfile
+    volumes:
+      - /app/.venv
+      - .:/app:z
+    env_file:
+      - ./.envs/.local/.django
+      - ./.envs/.local/.postgres
+    environment: *opendb-env
+    command: python -m opendb.vectors.worker --model-file /app/.models/granite-97m-r2-q8_0.gguf
+    depends_on:
+      data-postgres:
+        condition: service_healthy
+      django:
+        condition: service_healthy
+      embeddings:
+        condition: service_started

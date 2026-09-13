@@ -1,7 +1,9 @@
 # OpenDB MVP: orden de implementación
 
 **Spec:** ../specs/2026-09-13-mvp-design.md
-**Estado:** planificación; no hay funcionalidad del MVP implementada todavía.
+**Estado:** implementado y verificado en local en `feat/mvp`.
+La aceptación real de Google y del asistente requiere credenciales OAuth externas.
+Resultados y límites: [entrega del MVP](../../implementation/delivery.md).
 
 Este roadmap separa el MVP en incrementos verificables. No reemplaza los planes
 detallados de cada incremento. pgvector, embeddings y compartir están incluidos
@@ -20,10 +22,10 @@ en el MVP completo; el orden no significa posponerlos a otra versión del produc
 ## Alcance del primer plan
 
 El plan `2026-09-13-private-databases.md` cubre infraestructura y aprovisionamiento.
-No expone todavía SQL a un cliente MCP. El executor SQL requiere sus propias
-validaciones antes de recibir sentencias del agente.
+El MVP completo lo integra con `databases.services.dispatch`, una política AST
+para SQL, el gateway MCP y una API con la misma autorización.
 
-## Decisiones técnicas que deben cerrarse en sus incrementos
+## Decisiones técnicas implementadas
 
 - Etapa 2: flujo OAuth MCP verificado con SDK elegido; Google identifica usuarios,
   pero su token no debe aceptarse automáticamente como token de recurso de OpenDB.
@@ -34,4 +36,4 @@ validaciones antes de recibir sentencias del agente.
 - Etapa 6: mecanismo de vistas y revocación en conexiones activas; descubrimiento
   y búsqueda limitados al contenido autorizado.
 
-No crear el frontend ni facturación durante estos incrementos.
+Frontend y facturación quedan fuera de esta entrega, según el alcance acordado.

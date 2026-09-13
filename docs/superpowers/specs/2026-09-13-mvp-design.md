@@ -1,8 +1,9 @@
 # OpenDB: diseño del MVP
 
-Estado: decisiones funcionales consolidadas; diseño técnico para revisión. Los acuerdos confirmados están en
+Estado: diseño implementado en la entrega local; evidencias y límites en
+[delivery.md](../../implementation/delivery.md). Los acuerdos confirmados están en
 [el registro de decisiones](2026-09-13-mvp-decisions.md). Las propuestas adicionales
-se identifican expresamente. Este documento no afirma que exista implementación.
+se identifican expresamente. Los resultados de verificación se mantienen separados del diseño original.
 
 ## Objetivo
 

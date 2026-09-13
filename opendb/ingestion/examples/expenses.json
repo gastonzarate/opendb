@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "idempotency_key": "example-receipt-r1",
+  "expected_schema_fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+  "source": {
+    "content": "Receipt r1: Coffee USD 12.50. Date not supplied.",
+    "media_type": "text/plain"
+  },
+  "statements": [
+    "CREATE TABLE data.expenses (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, receipt text NOT NULL UNIQUE, merchant text, amount numeric(12,2) NOT NULL, currency text NOT NULL, spent_on date)"
+  ],
+  "records": [
+    {
+      "ref": "expense",
+      "table": "expenses",
+      "values": {
+        "receipt": {
+          "type": "text",
+          "value": "r1"
+        },
+        "merchant": {
+          "type": "text",
+          "value": "Coffee"
+        },
+        "amount": {
+          "type": "numeric",
+          "value": "12.50"
+        },
+        "currency": {
+          "type": "text",
+          "value": "USD"
+        },
+        "spent_on": {
+          "type": "date",
+          "value": null
+        }
+      },
+      "returning": [
+        "id",
+        "amount"
+      ]
+    }
+  ],
+  "annotations": [
+    {
+      "table": "expenses",
+      "description": "Household expenses; reuse receipt identities before inserting.",
+      "metadata": {
+        "conventions": "Unknown dates are SQL NULL. Never infer currency from locale."
+      }
+    },
+    {
+      "table": "expenses",
+      "column": "amount",
+      "description": "Exact amount in the currency column.",
+      "metadata": {
+        "units": "currency",
+        "purpose": "Expense amount"
+      }
+    }
+  ]
+}

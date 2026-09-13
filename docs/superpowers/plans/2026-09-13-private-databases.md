@@ -8,7 +8,9 @@ aprovisiona recursos con una conexión privilegiada separada; las conexiones de 
 usan credenciales limitadas por base. No se expone el aprovisionador a SQL del agente.
 **Tech Stack:** Django 6, Python 3.14, PostgreSQL 17, psycopg 3, Docker.
 **Spec:** ../specs/2026-09-13-mvp-design.md
-**Estado:** plan propuesto, sin ejecutar.
+**Estado:** ejecutado; pruebas reales y límites documentados en
+[la entrega](../../implementation/delivery.md). Los tests quedaron agrupados en
+`tests/integration/test_databases.py` y `test_sharing.py`.
 
 ## Global Constraints
 
@@ -45,7 +47,7 @@ El rol personal solo será propietario de su esquema `data` y los objetos que cr
 **Consumes:** modelo de usuarios existente.
 **Produces:** registro único por dueño y nombres no controlados por el solicitante.
 
-- [ ] Crear primero el test siguiente y ejecutarlo; debe fallar porque falta la app.
+- [x] Crear primero el test siguiente y ejecutarlo; debe fallar porque falta la app.
 
 ```python
 import pytest
@@ -61,10 +63,10 @@ def test_one_database_per_owner():
         PersonalDatabase.objects.create(owner=owner)
 ```
 
-- [ ] Crear modelo/migración con UUID por defecto, owner OneToOne, nombres derivados
+- [x] Crear modelo/migración con UUID por defecto, owner OneToOne, nombres derivados
   antes del primer save y estado pending. Agregar tests para nombres y dos dueños.
-- [ ] Ejecutar migrate y makemigrations --check --dry-run.
-- [ ] Ejecutar tests de app, Ruff y registrar un commit del incremento probado.
+- [x] Ejecutar migrate y makemigrations --check --dry-run.
+- [x] Ejecutar tests de app, Ruff y registrar un commit del incremento probado.
 
 ## Task 2: Aprovisionamiento recuperable
 
@@ -73,7 +75,7 @@ def test_one_database_per_owner():
 **Consumes:** PersonalDatabase; configuración privilegiada solo disponible al comando.
 **Produces:** base lista y rol personal; reintentos seguros.
 
-- [ ] Crear prueba de integración con PostgreSQL real, no SQLite:
+- [x] Crear prueba de integración con PostgreSQL real, no SQLite:
 
 ```python
 @pytest.mark.django_db(transaction=True)
@@ -89,13 +91,13 @@ Importar UserFactory y provision_personal_database de los módulos definidos arr
 La fixture del módulo registra los recursos que crea y los elimina al finalizar;
 solo opera sobre un clúster desechable exclusivo de tests.
 
-- [ ] Implementar contraseña determinista con HMAC y exigir clave no vacía antes de
+- [x] Implementar contraseña determinista con HMAC y exigir clave no vacía antes de
   conectar. El servidor PostgreSQL la almacena con SCRAM; no persistirla en el modelo.
-- [ ] Serializar el aprovisionamiento por UUID con advisory lock de sesión mantenido
+- [x] Serializar el aprovisionamiento por UUID con advisory lock de sesión mantenido
   por el comando; CREATE DATABASE requiere autocommit. Registrar estados en Django.
-- [ ] Crear rol primero como NOLOGIN y base con plantilla template0. Identificadores
+- [x] Crear rol primero como NOLOGIN y base con plantilla template0. Identificadores
   con psycopg.sql.Identifier y valores con parámetros donde PostgreSQL lo admite.
-- [ ] Dentro de la base, configurar permisos usando esta secuencia conceptual:
+- [x] Dentro de la base, configurar permisos usando esta secuencia conceptual:
 
 ```sql
 REVOKE ALL ON DATABASE personal_db FROM PUBLIC;
@@ -112,16 +114,16 @@ calculados/configurados que se componen con Identifier, no strings interpolados.
 El rol personal es NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS.
 No conceder CREATE a nivel de base ni membresía en roles administrativos.
 
-- [ ] Configurar LOGIN y contraseña al final y marcar ready solo tras comprobar la
+- [x] Configurar LOGIN y contraseña al final y marcar ready solo tras comprobar la
   conexión. Reintentos inspeccionan propietario y privilegios existentes antes de
   reutilizar recursos. Si los nombres pertenecen a recursos ajenos, fallar sin borrarlos.
-- [ ] En errores, marcar failed y conservar estado recuperable; no declarar atomicidad
+- [x] En errores, marcar failed y conservar estado recuperable; no declarar atomicidad
   entre CREATE DATABASE y el registro Django. Probar fallos después de crear rol,
   después de crear base y antes de marcar ready, reintentando cada caso.
-- [ ] Bootstrap del clúster de tests/desarrollo: revocar CONNECT/TEMP de PUBLIC en
+- [x] Bootstrap del clúster de tests/desarrollo: revocar CONNECT/TEMP de PUBLIC en
   bases de control y mantenimiento y conceder solo a roles administrativos necesarios.
   No ejecutar este bootstrap automáticamente contra un clúster externo compartido.
-- [ ] Documentar comando y variables en env.example y README; no valores reales.
+- [x] Documentar comando y variables en env.example y README; no valores reales.
 
 ## Task 3: Conexión restringida y pruebas de aislamiento
 
@@ -129,7 +131,7 @@ No conceder CREATE a nivel de base ni membresía en roles administrativos.
 **Consumes:** registro ready, contraseña derivada y host/puerto del clúster de datos.
 **Produces:** conexión autenticada realmente como personal_owner, sin SET ROLE desde admin.
 
-- [ ] Escribir este test con dos dueños y sus bases, aprovisionadas por fixture:
+- [x] Escribir este test con dos dueños y sus bases, aprovisionadas por fixture:
 
 ```python
 @pytest.mark.django_db(transaction=True)
@@ -140,25 +142,24 @@ def test_owner_cannot_select_other_database(two_owners):
             pass
 ```
 
-- [ ] Implementar lookup por owner y UUID, exigir ready y abrir conexión con rol y
+- [x] Implementar lookup por owner y UUID, exigir ready y abrir conexión con rol y
   contraseña personales. Cerrar siempre; sin pooling compartido en este incremento.
-- [ ] Añadir tests reales de PostgreSQL, no solo rechazo en Python: credenciales de
+- [x] Añadir tests reales de PostgreSQL, no solo rechazo en Python: credenciales de
   Alice contra la base de Bob y la de control deben fallar. Alice puede crear,
   insertar, consultar, alterar y borrar sus propias tablas en `data`.
-- [ ] Probar rechazo de CREATE ROLE, CREATE DATABASE, SET ROLE administrativo,
+- [x] Probar rechazo de CREATE ROLE, CREATE DATABASE, SET ROLE administrativo,
   creación/modificación en opendb_catalog y lectura de archivos del servidor.
-- [ ] Probar reuso secuencial Alice/Bob sin contaminación de conexiones.
-- [ ] Probar creación concurrente para el mismo owner: un registro y una base lista.
-- [ ] Ejecutar suite existente y nueva, Ruff, check, migraciones y registrar resultados.
+- [x] Probar reuso secuencial Alice/Bob sin contaminación de conexiones.
+- [x] Probar creación concurrente para el mismo owner: un registro y una base lista.
+- [x] Ejecutar suite existente y nueva, Ruff, check, migraciones y registrar resultados.
 
 ## Comandos de validación
 
 ```bash
-docker compose -f docker-compose.local.yml run --rm django python manage.py check
-docker compose -f docker-compose.local.yml run --rm django python manage.py makemigrations --check --dry-run
-docker compose -f docker-compose.local.yml run --rm django pytest opendb/databases/tests -v
-docker compose -f docker-compose.local.yml run --rm django pytest
-docker compose -f docker-compose.local.yml run --rm django ruff check .
+scripts/test tests/integration/test_databases.py tests/integration/test_sharing.py
+uv run python manage.py check --settings=config.settings.integration
+uv run python manage.py makemigrations --check --dry-run --settings=config.settings.integration
+uv run ruff check .
 ```
 
 El clúster de integración debe ser un servicio dedicado dentro del entorno de tests;
@@ -175,6 +176,6 @@ para los tests de bootstrap. Las fixtures pasan las conexiones de ese servicio a
 - [CREATE ROLE](https://www.postgresql.org/docs/17/sql-createrole.html): definir
   privilegios del rol personal explícitamente.
 
-Este incremento no garantiza todavía seguridad de SQL arbitrario expuesto por MCP,
-confidencialidad de todos los metadatos del clúster ni aislamiento de recursos físicos.
-Esas interfaces necesitan restricciones y pruebas antes de su exposición al agente.
+El executor MCP agregado al MVP valida un subconjunto explícito de SQL. Las
+credenciales PostgreSQL permanecen dentro del backend. Compartir clúster no ofrece
+aislación de recursos físicos; no se promete SQL arbitrario de superusuario.

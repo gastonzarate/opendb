@@ -1,5 +1,6 @@
 # ruff: noqa: ERA001, E501
 """Base settings to build other settings files upon."""
+
 import os
 from pathlib import Path
 
@@ -62,7 +63,6 @@ else:
 
 DATABASES["default"]["ATOMIC_REQUESTS"] = True
 # https://docs.djangoproject.com/en/stable/ref/settings/#std:setting-DEFAULT_AUTO_FIELD
-DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # URLS
 # ------------------------------------------------------------------------------
@@ -297,3 +297,31 @@ SOCIALACCOUNT_FORMS = {"signup": "opendb.users.forms.UserSocialSignupForm"}
 
 # Your stuff...
 # ------------------------------------------------------------------------------
+
+INSTALLED_APPS += ["opendb.databases"]
+OPENDB_ADMIN_DSN = env("OPENDB_ADMIN_DSN", default="")
+OPENDB_DB_CREDENTIAL_KEY = env("OPENDB_DB_CREDENTIAL_KEY", default="")
+
+# Google identifies users; application services enforce database authorization.
+INSTALLED_APPS += ["allauth.socialaccount.providers.google"]
+SOCIALACCOUNT_ADAPTER = "opendb.gateway.adapters.GoogleSocialAccountAdapter"
+OPENDB_GOOGLE_CLIENT_ID = env("OPENDB_GOOGLE_CLIENT_ID", default="")
+OPENDB_GOOGLE_CLIENT_SECRET = env("OPENDB_GOOGLE_CLIENT_SECRET", default="")
+SOCIALACCOUNT_PROVIDERS = {
+    "google": {
+        "APP": {
+            "client_id": OPENDB_GOOGLE_CLIENT_ID,
+            "secret": OPENDB_GOOGLE_CLIENT_SECRET,
+            "key": "",
+        },
+        "SCOPE": ["profile", "email"],
+    }
+}
+OPENDB_MCP_BASE_URL = env("OPENDB_MCP_BASE_URL", default="http://localhost:8001")
+OPENDB_MCP_JWT_SIGNING_KEY = env("OPENDB_MCP_JWT_SIGNING_KEY", default="")
+OPENDB_MCP_STORAGE_ENCRYPTION_KEY = env("OPENDB_MCP_STORAGE_ENCRYPTION_KEY", default="")
+OPENDB_MCP_STATE_DIRECTORY = env("OPENDB_MCP_STATE_DIRECTORY", default="/state/oauth")
+OPENDB_MCP_ALLOWED_CLIENT_REDIRECT_URIS = env.list(
+    "OPENDB_MCP_ALLOWED_CLIENT_REDIRECT_URIS",
+    default=["http://localhost:*/*", "http://127.0.0.1:*/*"],
+)

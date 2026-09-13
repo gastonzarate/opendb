@@ -1,7 +1,7 @@
 volumes:
   opendb_local_postgres_data: {}
   opendb_local_postgres_data_backups: {}
-  
+
 
 services:
   django:
