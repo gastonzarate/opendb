@@ -1,0 +1,6 @@
+# Development only. Never reuse for production.
+POSTGRES_HOST=postgres
+POSTGRES_PORT=5432
+POSTGRES_DB=opendb
+POSTGRES_USER=opendb
+POSTGRES_PASSWORD=opendb-local-only

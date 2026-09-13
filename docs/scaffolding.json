@@ -1,0 +1,24 @@
+{
+  "template": "https://github.com/cookiecutter/cookiecutter-django",
+  "commit": "5d3e4bc6a16f0e1fa439916dc7fa804e185ebae4",
+  "options": {
+    "project_name": "OpenDB",
+    "project_slug": "opendb",
+    "use_docker": "y",
+    "postgresql_version": "17",
+    "username_type": "email",
+    "use_async": "y",
+    "rest_api": "None",
+    "cloud_provider": "None",
+    "mail_service": "Other SMTP",
+    "frontend_pipeline": "None",
+    "use_celery": "n",
+    "mail_catcher": "Mailpit",
+    "use_sentry": "n",
+    "use_whitenoise": "y",
+    "ci_tool": "Github",
+    "keep_local_envs_in_vcs": "n",
+    "open_source_license": "Not open source"
+  },
+  "adjustment": "Removed generated license metadata; product license not selected."
+}
