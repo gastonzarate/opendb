@@ -52,7 +52,8 @@ direct owner access to catalog tables. It never changes vector-owned objects.
 
 `describe` returns `{schema: "data", fingerprint: "<64 hex>", objects: [...]}`. Each
 object has `schema`, `name`, `kind`, `row_security`, `columns`, `primary_key`,
-`unique_constraints`, `foreign_keys`, `description`, and `metadata`. Columns contain
+`unique_constraints`, `foreign_keys`, `description`, `metadata`, `display_name`, and
+`attributes_summary`. Columns contain
 `name`, `type`, `nullable`, `identity`, `generated`, `has_default`, `description`, and
 `metadata`; identity/generated flags use PostgreSQL's catalog values. FK references
 contain `schema`, `table` and ordered `columns`; update/delete actions use PostgreSQL's
@@ -72,6 +73,26 @@ function. This prevents an owner-written description from accidentally disclosin
 view's private sources. Do not grant guests `read_annotations()`; a future shared
 annotation feature requires a separate sanitized read interface and opt-in content.
 
+Table annotations can include `metadata.display_name` (up to 200 characters) and
+`metadata.attributes_summary` (up to 2,000 characters). The display name is a
+human-readable label, for example “Intervenciones de la conversación” for `turns`;
+it never changes the physical SQL identifier. Write `description` as a clear
+explanation of what one record represents and why the table exists. The attributes
+summary briefly explains the information available, rather than repeating SQL types.
+Keep column descriptions for field meanings, units and relationships. The assistant
+maintains this documentation when creating or materially changing a table.
+
+The frontend uses these labels in the sidebar and table heading, but continues to
+send physical names in queries and access grants. Older tables fall back to a
+humanized physical name and a short summary of their visible columns. Guests receive
+only that structural fallback, not private owner annotations. Metadata edits do not
+change the schema fingerprint. Existing databases receive the updated annotation
+function through `python manage.py upgrade_catalog --all-ready` after control
+migrations and before restarting ingestion services. Dokploy's web startup runs
+this command automatically. It preserves annotations and data, bounds lock waits,
+and fails the rollout if any ready database could not be upgraded; rerun it after
+resolving the reported failures. Use `--database-id UUID` for a targeted upgrade.
+
 `apply` requires the actual restricted data-schema owner, an idle psycopg3 connection,
 and the complete operation below. It rejects an existing transaction rather than
 returning a successful result that an outer transaction could still roll back. It
@@ -87,7 +108,7 @@ no owner/actor field in the operation.
 | `source` | Required `content` and `media_type`; optional `name`, `uri`. URI is metadata, never fetched. Original text is stored unchanged. |
 | `statements` | Array of single transactional DDL statements, executed in order. Relations must be explicitly `data`-qualified. |
 | `records` | Ordered array of `{ref, table, values, returning, on_conflict?}`. Each ref is unique. |
-| `annotations` | Array of `{table, column?, description, metadata}`; metadata permits only string `purpose`, `units`, `conventions`. |
+| `annotations` | Array of `{table, column?, description, metadata}`; metadata permits string `purpose`, `units`, `conventions`, plus table-only `display_name` and `attributes_summary`. |
 
 Every top-level field is required; unknown fields are rejected throughout the
 contract. Each array permits at most 1,000 entries. Source text permits at most

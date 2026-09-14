@@ -14,6 +14,8 @@ export interface Column {
 }
 export interface DataObject {
   name: string;
+  display_name?: string;
+  attributes_summary?: string;
   kind: string;
   description: string;
   columns: Column[];

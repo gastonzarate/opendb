@@ -311,3 +311,30 @@ it("does not recreate a deleted database on reload", async () => {
     false,
   );
 });
+
+it("searches friendly and physical names without changing the sidebar query target", async () => {
+  const { state, queries } = catalogFixture();
+  Object.assign(state.objects[0], { display_name: "Gastos personales" });
+  render(<App />);
+  await screen.findByText("Compra");
+  expect(
+    screen.getByRole("button", { name: "Gastos personales" }),
+  ).toHaveAttribute("aria-current", "true");
+  expect(
+    screen.getByRole("heading", { name: "Gastos personales" }),
+  ).toBeInTheDocument();
+  const search = screen.getByLabelText("Buscar tablas y vistas");
+  fireEvent.change(search, { target: { value: "PERSONALES" } });
+  expect(
+    screen.getByRole("button", { name: "Gastos personales" }),
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "resumen mensual" }),
+  ).not.toBeInTheDocument();
+  fireEvent.change(search, { target: { value: "gastos" } });
+  fireEvent.click(screen.getByRole("button", { name: "Gastos personales" }));
+  expect(queries.at(-1)?.sql).toContain('data."gastos"');
+  expect(
+    screen.queryByRole("combobox", { name: "Tabla o vista" }),
+  ).not.toBeInTheDocument();
+});

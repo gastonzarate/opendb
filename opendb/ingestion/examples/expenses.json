@@ -46,7 +46,9 @@
       "table": "expenses",
       "description": "Household expenses; reuse receipt identities before inserting.",
       "metadata": {
-        "conventions": "Unknown dates are SQL NULL. Never infer currency from locale."
+        "conventions": "Unknown dates are SQL NULL. Never infer currency from locale.",
+        "display_name": "Household expenses",
+        "attributes_summary": "Receipt, merchant, amount, currency and spending date."
       }
     },
     {

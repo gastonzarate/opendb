@@ -185,9 +185,12 @@ def _annotation(annotation):
     if "column" in annotation:
         identifier(annotation["column"])
     _text(annotation["description"], 10_000, empty=True)
-    _keys(annotation["metadata"], set(), {"purpose", "units", "conventions"})
-    for value in annotation["metadata"].values():
-        _text(value, 10_000, empty=True)
+    limits = {"purpose": 10_000, "units": 10_000, "conventions": 10_000}
+    if "column" not in annotation:
+        limits.update(display_name=200, attributes_summary=2000)
+    _keys(annotation["metadata"], set(), set(limits))
+    for key, value in annotation["metadata"].items():
+        _text(value, limits[key], empty=True)
 
 
 def validate_operation(operation):

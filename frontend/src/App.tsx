@@ -464,11 +464,16 @@ function DatabaseWorkspace({
             <div className="object-list">
               {objects
                 .filter((o) =>
-                  o.name.toLowerCase().includes(query.toLowerCase()),
+                  [o.name, o.display_name || ""].some((name) =>
+                    name
+                      .toLocaleLowerCase()
+                      .includes(query.toLocaleLowerCase()),
+                  ),
                 )
                 .map((o) => (
                   <button
                     key={o.name}
+                    title={o.name}
                     className={
                       section === "explorer" && o.name === objectName
                         ? "object-active"
@@ -490,7 +495,7 @@ function DatabaseWorkspace({
                     ) : (
                       <Table2 size={15} />
                     )}
-                    <span>{o.name}</span>
+                    <span>{o.display_name?.trim() || o.name}</span>
                   </button>
                 ))}
               {!objects.length && (

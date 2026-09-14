@@ -105,7 +105,12 @@ describe("AccessPanel", () => {
 
   it("crea un rol, concede un objeto e invita por correo, recargando el estado real", async () => {
     request.mockResolvedValueOnce([]);
-    render(<AccessPanel {...props} />);
+    render(
+      <AccessPanel
+        {...props}
+        objects={[{ ...objects[0], display_name: "Artículos publicados" }]}
+      />,
+    );
     await screen.findByText(/no hay roles/i);
     request
       .mockResolvedValueOnce({ id: "role-1", name: "Lectores" })
@@ -122,6 +127,9 @@ describe("AccessPanel", () => {
     request
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce([{ ...role, emails: [] }]);
+    expect(
+      screen.getByRole("option", { name: "Artículos publicados (articulos)" }),
+    ).toHaveValue("articulos");
     fireEvent.change(screen.getByLabelText("Objeto para Lectores"), {
       target: { value: "articulos" },
     });
@@ -226,8 +234,16 @@ describe("AccessPanel", () => {
 describe("VectorPanel", () => {
   it("registra usando las columnas del catálogo y muestra contadores y resultados reales", async () => {
     request.mockResolvedValueOnce([]);
-    render(<VectorPanel {...props} />);
+    render(
+      <VectorPanel
+        {...props}
+        objects={[{ ...objects[0], display_name: "Artículos publicados" }]}
+      />,
+    );
     await screen.findByText(/no hay índices/i);
+    expect(
+      screen.getByRole("option", { name: "Artículos publicados (articulos)" }),
+    ).toHaveValue("articulos");
     fireEvent.change(screen.getByLabelText("Tabla de origen"), {
       target: { value: "articulos" },
     });

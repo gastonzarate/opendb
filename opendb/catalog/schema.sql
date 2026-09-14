@@ -80,7 +80,17 @@ BEGIN
     END IF;
     IF p_description IS NULL OR length(p_description)>10000 OR p_metadata IS NULL
        OR jsonb_typeof(p_metadata)<>'object'
-       OR (p_metadata - ARRAY['purpose','units','conventions']::text[]) <> '{}'::jsonb THEN
+       OR (p_metadata - ARRAY['purpose','units','conventions','display_name','attributes_summary']::text[]) <> '{}'::jsonb THEN
+        RAISE EXCEPTION 'Invalid annotation' USING ERRCODE = 'POD02';
+    END IF;
+    IF (p_column IS NOT NULL AND p_metadata ?| ARRAY['display_name','attributes_summary'])
+       OR EXISTS (
+           SELECT FROM jsonb_each(p_metadata) entry
+           WHERE jsonb_typeof(entry.value)<>'string'
+              OR length(entry.value #>> '{}') > CASE entry.key
+                  WHEN 'display_name' THEN 200
+                  WHEN 'attributes_summary' THEN 2000 ELSE 10000 END
+       ) THEN
         RAISE EXCEPTION 'Invalid annotation' USING ERRCODE = 'POD02';
     END IF;
     INSERT INTO opendb_catalog.annotations

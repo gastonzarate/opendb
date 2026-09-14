@@ -215,7 +215,10 @@ export function VectorPanel({ databaseId, objects, isOwner }: PanelProps) {
                   <option value="">Selecciona una tabla</option>
                   {eligible.map((object) => (
                     <option key={object.name} value={object.name}>
-                      {object.name}
+                      {object.display_name?.trim() &&
+                      object.display_name.trim() !== object.name
+                        ? `${object.display_name.trim()} (${object.name})`
+                        : object.name}
                     </option>
                   ))}
                 </select>

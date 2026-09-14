@@ -125,6 +125,9 @@ export function Explorer({
       if (generation === request.current) setBusy(false);
     }
   }
+  const displayName = object?.display_name?.trim() || object?.name;
+  const description = object?.description?.trim();
+  const summary = object?.attributes_summary?.trim();
   const allRows = result?.rows || [];
   const rows = (tab === "data" ? allRows.slice(0, 50) : allRows).filter(
     (row) =>
@@ -138,13 +141,19 @@ export function Explorer({
       <div className="panel-head">
         <div>
           <div className="eyebrow">
-            {object?.kind === "view" ? "VISTA" : "TABLA"} · data
+            {object?.kind === "view" ? "VISTA" : "TABLA"} ·{" "}
+            {object && displayName !== object.name
+              ? `data.${object.name}`
+              : "data"}
           </div>
-          <h2>{object?.name || "Explorador SQL"}</h2>
-          <p className="muted">
-            {object?.description ||
-              "Consultá y organizá el contexto de tu base."}
-          </p>
+          <h2>{displayName || "Explorador SQL"}</h2>
+          {description && <p className="object-description">{description}</p>}
+          {summary && summary !== description && (
+            <p className="muted object-summary">{summary}</p>
+          )}
+          {!object && (
+            <p className="muted">Consultá y organizá el contexto de tu base.</p>
+          )}
         </div>
         <span className="badge">
           {isOwner ? "Propietario" : "Solo lectura"}

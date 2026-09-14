@@ -23,29 +23,42 @@ Las credenciales Google se reutilizaron de la configuración local autorizada.
 Las claves de sesión, derivación y MCP de producción son nuevas y deben preservarse.
 No se trasladaron transcripciones ni bases personales locales al ambiente nuevo.
 
-## Bloqueo de Dokploy encontrado antes del despliegue
+## Infraestructura compartida: Dokploy recuperado con autorización
 
-- Host `macaco`, EC2 Graviton ARM64, IP pública `3.149.225.221`.
-- `https://dockploy.macaco.ai` devuelve 502; puerto 3000 rechaza conexiones.
-- Partición raíz 145 GiB útiles, 100% ocupada, 0 disponibles.
-- El manager de Swarm falla con `WAL error cannot be repaired: unexpected EOF`
-  y `max entry size limit exceeded`. No están corriendo los servicios del panel.
-- Siguen corriendo contenedores de Macaco y Traefik. El API existente responde 401.
-- Hay aproximadamente 97 GB de imágenes reportadas como recuperables y permanece
-  el volumen PostgreSQL 16 de Dokploy. No se eliminaron imágenes ni volúmenes y no
-  se reinició Docker/Swarm.
-
-## Intervención propuesta, pendiente de autorización
-
-1. Respaldar el disco y los datos/configuración de Dokploy. Inventariar servicios,
-   redes y volúmenes antes de tocar el estado de Swarm. Una copia en caliente no
-   equivale a un backup consistente de Raft.
-2. Recuperar espacio primero con cachés/imágenes revisadas, preservando los
-   contenedores activos, volúmenes de datos y las imágenes necesarias para rollback.
-3. Evaluar backups de Swarm; restaurar o reconstruir el plano de control únicamente
-   después de definir la ventana de mantenimiento. Puede afectar las apps existentes.
-   `--force-new-cluster` no garantiza reparar un WAL corrupto.
-4. Validar Macaco y Dokploy antes de crear el proyecto/Compose separado de OpenDB.
+- Host `macaco`, EC2 Graviton ARM64 `i-0b792bc3e0030bccb`, IP pública
+  `3.149.225.221`, privada `172.31.41.158`, región `us-east-2`.
+- Causa observada: raíz llena y registro final incompleto del WAL de Swarm;
+  la reparación automática no pudo completar su copia `.broken` sin espacio.
+  Traefik respondía 502 porque no estaba disponible el servicio del panel.
+- Antes de modificar el host se inició el snapshot EBS
+  `snap-0c36fbdd29ff45f72` del volumen `vol-0c93ce4d1810f4812` (150 GiB).
+  Al verificar la recuperación, el snapshot seguía `pending`; no tratarlo como
+  backup terminado hasta que AWS indique `completed`.
+- Se verificó una copia local privada de `/etc/dokploy`, el estado completo de
+  Swarm, el volumen PostgreSQL 16 de Dokploy y su configuración Docker, junto
+  con inventario de contenedores, imágenes, redes y volúmenes. Después de recuperar
+  PostgreSQL se obtuvo además un `pg_dump` lógico de Dokploy. Los archivos están
+  fuera del repositorio, con permisos 0600, en
+  `/home/gastonzarate/.local/state/macaco-dokploy-recovery-20260914/`.
+  Las copias físicas de Swarm y el snapshot se tomaron en caliente.
+- Se eliminaron 89 imágenes antiguas sin etiqueta, revisadas por servicio Compose,
+  conservando todas las etiquetadas, todas las referenciadas por contenedores y
+  hasta dos versiones sin etiqueta recientes por servicio. Se limpió únicamente
+  caché de compilación sin uso de más de siete días. No se podaron volúmenes,
+  redes ni contenedores. La raíz pasó de 0 disponibles a unos 59 GiB libres (60% usada).
+- Al liberar espacio, Docker reparó el WAL y recuperó los servicios originales.
+  Luego se ejecutó `docker swarm init --force-new-cluster --advertise-addr 172.31.41.158`
+  sobre ese estado recuperado para quitar el estado local residual de error.
+  No se reinició el daemon Docker ni se reconstruyó la base de Dokploy.
+- Dokploy se fijó a la imagen ARM64 verificada v0.25.11:
+  `dokploy/dokploy@sha256:abfff2a8d5cea84de1a6ba00c3e3837fb4590512eb8a1cf3c2d70b192aa8ecd1`.
+  Se preservaron las definiciones originales, credenciales, configuraciones y
+  el volumen `dokploy-postgres-database` (PostgreSQL 16).
+- Verificación: Swarm `active`, nodo `Ready/Leader`, servicios `dokploy`,
+  `dokploy-postgres` y `dokploy-redis` a 1/1. Panel y API autenticada
+  `project.all`: HTTP 200; proyectos originales presentes. `app.macaco.ai` y
+  `langfuse.macaco.ai`: HTTP 200; `api.macaco.ai`: HTTP 401 esperado sin autenticación.
+  Los 11 contenedores que ya corrían conservaron sus IDs y fechas de arranque.
 
 Referencia de recuperación:
 [Docker Swarm administration](https://docs.docker.com/engine/swarm/admin_guide/).

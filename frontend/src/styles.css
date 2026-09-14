@@ -1280,3 +1280,14 @@ tbody tr:hover {
   margin-top: 24px;
   flex-wrap: wrap;
 }
+
+.explorer .panel-head > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.explorer .panel-head .eyebrow {
+  color: var(--muted);
+}
+.explorer .panel-head .object-summary {
+  margin-top: 6px;
+}

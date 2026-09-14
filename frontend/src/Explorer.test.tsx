@@ -70,3 +70,54 @@ it("switching away from a pending data request leaves SQL usable", async () => {
   );
   resolve({ columns: ["id"], rows: [[99]] });
 });
+
+it("shows friendly metadata once while querying and editing the physical name", async () => {
+  vi.mocked(api).mockResolvedValue({ columns: ["id"], rows: [] });
+  const object = {
+    ...obj,
+    display_name: "Gastos personales",
+    attributes_summary: "Identificador y monto de cada gasto.",
+  };
+  render(
+    <Explorer databaseId="db" object={object} isOwner onChanged={() => {}} />,
+  );
+  expect(
+    screen.getByRole("heading", { name: "Gastos personales" }),
+  ).toBeInTheDocument();
+  expect(screen.getByText(/data\.expenses$/)).toBeInTheDocument();
+  expect(screen.getAllByText("Gastos")).toHaveLength(1);
+  expect(screen.getAllByText(object.attributes_summary)).toHaveLength(1);
+  await waitFor(() =>
+    expect(api).toHaveBeenCalledWith("query", {
+      database_id: "db",
+      sql: 'SELECT * FROM data."expenses" ORDER BY "id" LIMIT 51 OFFSET 0',
+    }),
+  );
+  fireEvent.click(screen.getByRole("tab", { name: "Estructura" }));
+  expect(screen.getAllByText(object.attributes_summary)).toHaveLength(1);
+  fireEvent.click(screen.getByRole("tab", { name: "Consulta SQL" }));
+  expect(screen.getByLabelText("Consulta o cambio de esquema")).toHaveValue(
+    'SELECT * FROM data."expenses" LIMIT 50;',
+  );
+});
+
+it("keeps legacy table names without empty or duplicate metadata", async () => {
+  vi.mocked(api).mockResolvedValue({ columns: [], rows: [] });
+  render(
+    <Explorer databaseId="db" object={obj} isOwner onChanged={() => {}} />,
+  );
+  expect(screen.getByRole("heading", { name: "expenses" })).toBeInTheDocument();
+  expect(screen.queryByText("data.expenses")).not.toBeInTheDocument();
+  await screen.findByText("No hay registros para mostrar.");
+});
+
+it("omits repeated summaries and falls back from blank display names", async () => {
+  vi.mocked(api).mockResolvedValue({ columns: [], rows: [] });
+  const object = { ...obj, display_name: "  ", attributes_summary: " Gastos " };
+  render(
+    <Explorer databaseId="db" object={object} isOwner onChanged={() => {}} />,
+  );
+  expect(screen.getByRole("heading", { name: "expenses" })).toBeInTheDocument();
+  expect(screen.getAllByText("Gastos")).toHaveLength(1);
+  await screen.findByText("No hay registros para mostrar.");
+});

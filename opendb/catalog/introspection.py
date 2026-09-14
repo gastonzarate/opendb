@@ -2,11 +2,15 @@
 
 import hashlib
 import json
+import re
 
 import psycopg
 from psycopg.rows import dict_row
 
 from .install import CatalogError
+
+SUMMARY_COLUMNS = 8
+SUMMARY_COLUMN_DESCRIPTION_CHARS = 120
 
 RELATIONS = """
 SELECT c.oid, c.relname, c.relkind, c.relrowsecurity
@@ -17,6 +21,44 @@ WHERE n.nspname='data' AND c.relkind IN ('r','p','v','m')
   AND pg_catalog.has_table_privilege(c.oid, 'SELECT')
 ORDER BY c.relname
 """
+
+
+def _semantic_text(value, limit):
+    """Ignore malformed direct metadata; never interpret it as code or SQL."""
+    if not isinstance(value, str) or len(value) > limit or "\x00" in value:
+        return ""
+    return " ".join(value.split())
+
+
+def _humanize(name):
+    words = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", name)
+    words = re.sub(r"[_\s-]+", " ", words).strip()
+    return words[:1].upper() + words[1:]
+
+
+def _business_labels(item):
+    metadata = item["metadata"]
+    item["display_name"] = _semantic_text(
+        metadata.get("display_name"), 200
+    ) or _humanize(item["name"])
+    summary = _semantic_text(metadata.get("attributes_summary"), 2000)
+    if not summary:
+        fields = []
+        for column in item["columns"][:SUMMARY_COLUMNS]:
+            label = _humanize(column["name"])
+            description = _semantic_text(column["description"], 10_000)
+            if description:
+                description = (
+                    description[: SUMMARY_COLUMN_DESCRIPTION_CHARS - 1] + "…"
+                    if len(description) > SUMMARY_COLUMN_DESCRIPTION_CHARS
+                    else description
+                )
+                label += ": " + description
+            fields.append(label)
+        summary = "; ".join(fields)
+        if len(item["columns"]) > SUMMARY_COLUMNS:
+            summary += "; …"
+    item["attributes_summary"] = summary
 
 
 def _annotations(cur):
@@ -34,7 +76,7 @@ def _annotations(cur):
     return {
         (int(item["relation_oid"]), item["column_number"]): {
             "description": item["description"],
-            "metadata": item["metadata"],
+            "metadata": item["metadata"] if isinstance(item["metadata"], dict) else {},
         }
         for item in cur.fetchone()["annotations"]
     }
@@ -178,6 +220,7 @@ def describe(conn):
                             (oid, raw["attnum"]), {"description": "", "metadata": {}}
                         )
                     )
+                _business_labels(item)
                 objects.append(item)
             fingerprint = hashlib.sha256(
                 json.dumps(

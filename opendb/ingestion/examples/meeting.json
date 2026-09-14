@@ -139,10 +139,28 @@
   ],
   "annotations": [
     {
+      "table": "meetings",
+      "description": "Meetings whose conversations are preserved, with dates and time zones only when known.",
+      "metadata": {
+        "display_name": "Meetings",
+        "attributes_summary": "Meeting identity, title, date and time zone."
+      }
+    },
+    {
+      "table": "people",
+      "description": "People linked to meeting participants only when their identity has been verified.",
+      "metadata": {
+        "display_name": "People",
+        "attributes_summary": "Person identity, verified external identity and name."
+      }
+    },
+    {
       "table": "participants",
       "description": "Speaker labels within a meeting; labels are not verified identities.",
       "metadata": {
-        "conventions": "Reuse a person only after matching a verified external identity. Keep person_id NULL otherwise."
+        "conventions": "Reuse a person only after matching a verified external identity. Keep person_id NULL otherwise.",
+        "display_name": "Meeting participants",
+        "attributes_summary": "Meeting, optional verified person and speaker label."
       }
     },
     {
@@ -150,7 +168,31 @@
       "description": "Ordered verbatim utterances linked to the meeting and its participants.",
       "metadata": {
         "units": "seconds from recording start",
-        "conventions": "ordinal is global within a meeting. Missing dates, timestamps and identities remain NULL."
+        "conventions": "ordinal is global within a meeting. Missing dates, timestamps and identities remain NULL.",
+        "display_name": "Conversation turns",
+        "attributes_summary": "Meeting, participant, sequence, verbatim text and recording offsets."
+      }
+    },
+    {
+      "table": "turns",
+      "column": "body",
+      "description": "Original spoken text for this individual turn.",
+      "metadata": {}
+    },
+    {
+      "table": "turns",
+      "column": "starts_at",
+      "description": "Start offset from recording start; unknown offsets remain NULL.",
+      "metadata": {
+        "units": "seconds"
+      }
+    },
+    {
+      "table": "turns",
+      "column": "ends_at",
+      "description": "End offset from recording start; unknown offsets remain NULL.",
+      "metadata": {
+        "units": "seconds"
       }
     }
   ]

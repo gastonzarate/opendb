@@ -38,6 +38,65 @@ def test_operation_validation_does_not_mutate_payload():
 
 
 @pytest.mark.parametrize(
+    ("field", "limit"), [("display_name", 200), ("attributes_summary", 2000)]
+)
+def test_business_metadata_strings_are_optional_and_bounded(field, limit):
+    data = operation()
+    annotation = {
+        "table": "expenses",
+        "description": "Expenses",
+        "metadata": {field: "x" * limit},
+    }
+    data["annotations"] = [annotation]
+    validate_operation(data)
+    for invalid_value in (None, 1, True, [], {}, "x" * (limit + 1), "bad\x00text"):
+        annotation["metadata"][field] = invalid_value
+        with pytest.raises(IngestionError):
+            validate_operation(data)
+    annotation["metadata"][field] = ""
+    validate_operation(data)
+    annotation["column"] = "amount"
+    with pytest.raises(IngestionError):
+        validate_operation(data)
+
+
+def test_public_schema_and_examples_accept_only_table_business_metadata():
+    from jsonschema import Draft202012Validator
+
+    from opendb.ingestion import example_operation
+    from opendb.ingestion import operation_schema
+
+    schema = operation_schema()
+    Draft202012Validator.check_schema(schema)
+    validator = Draft202012Validator(schema)
+    for kind in ("meeting", "expenses"):
+        example = example_operation(kind, "0" * 64)
+        validator.validate(example)
+        validate_operation(example)
+    data = operation()
+    annotation = {
+        "table": "expenses",
+        "description": "Expenses",
+        "metadata": {
+            "display_name": "Expenses",
+            "attributes_summary": "Amounts and dates",
+        },
+    }
+    data["annotations"] = [annotation]
+    validator.validate(data)
+    for key, bad in (
+        ("display_name", "x" * 201),
+        ("attributes_summary", "x" * 2001),
+        ("display_name", 1),
+    ):
+        malformed = copy.deepcopy(data)
+        malformed["annotations"][0]["metadata"][key] = bad
+        assert list(validator.iter_errors(malformed))
+    annotation["column"] = "amount"
+    assert list(validator.iter_errors(data))
+
+
+@pytest.mark.parametrize(
     ("field", "value"),
     [
         ("version", True),
