@@ -26,6 +26,20 @@ def provision_personal_database(owner_id, *, recreate_deleted=False):
         raise
 
 
+def _grant_provisioner_membership(admin, owner_role):
+    """RDS administrators need explicit owner privileges; never grant the reverse."""
+    administrator, unrestricted = admin.execute(
+        "SELECT current_user, rolsuper FROM pg_catalog.pg_roles "
+        "WHERE rolname=current_user"
+    ).fetchone()
+    if not unrestricted:
+        admin.execute(
+            sql.SQL("GRANT {} TO {} WITH INHERIT TRUE, SET TRUE").format(
+                sql.Identifier(owner_role), sql.Identifier(administrator)
+            )
+        )
+
+
 def _provision(db, *, recreate_deleted=False):  # noqa: C901 -- Explicit lifecycle states.
     password = derive_database_password(db.id)
     with database_lock(db.id) as admin:
@@ -66,6 +80,7 @@ def _provision(db, *, recreate_deleted=False):  # noqa: C901 -- Explicit lifecyc
                             sql.Identifier(db.role_name), sql.Literal(marker)
                         )
                     )
+            _grant_provisioner_membership(admin, db.role_name)
             existing = admin.execute(
                 "SELECT pg_get_userbyid(datdba), "
                 "shobj_description(oid, 'pg_database') "

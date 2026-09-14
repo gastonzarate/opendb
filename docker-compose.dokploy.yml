@@ -1,0 +1,148 @@
+# Standalone Compose deployment. Build web once before starting the project.
+x-app: &app
+  image: ${OPENDB_IMAGE:-opendb-dokploy:local}
+  platform: linux/arm64
+  pull_policy: never
+  restart: unless-stopped
+  init: true
+  networks: [app]
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  stop_grace_period: 45s
+
+x-app-env: &app-env
+  DJANGO_SETTINGS_MODULE: config.settings.dokploy
+  DJANGO_READ_DOT_ENV_FILE: 'false'
+  DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?required}
+  DJANGO_ADMIN_URL: ${DJANGO_ADMIN_URL:-admin/}
+  OPENDB_DOMAIN: ${OPENDB_DOMAIN:?required DNS hostname}
+  DATABASE_URL: ${DATABASE_URL:?required control role DSN}
+  OPENDB_ADMIN_DSN: ${OPENDB_ADMIN_DSN:?required administrative DSN}
+  OPENDB_DB_CREDENTIAL_KEY: ${OPENDB_DB_CREDENTIAL_KEY:?required stable key}
+  OPENDB_GOOGLE_CLIENT_ID: ${OPENDB_GOOGLE_CLIENT_ID:?required}
+  OPENDB_GOOGLE_CLIENT_SECRET: ${OPENDB_GOOGLE_CLIENT_SECRET:?required}
+  OPENDB_MCP_JWT_SIGNING_KEY: ${OPENDB_MCP_JWT_SIGNING_KEY:?required stable key}
+  OPENDB_MCP_STORAGE_ENCRYPTION_KEY: ${OPENDB_MCP_STORAGE_ENCRYPTION_KEY:?required Fernet key}
+  OPENDB_MCP_ALLOWED_CLIENT_REDIRECT_URIS: ${OPENDB_MCP_ALLOWED_CLIENT_REDIRECT_URIS:?required comma separated URIs}
+  OPENDB_EMBEDDING_URL: http://embeddings:8080
+  REDIS_URL: redis://redis:6379/0
+  FORWARDED_ALLOW_IPS: '*'
+
+services:
+  web:
+    <<: *app
+    build:
+      context: .
+      dockerfile: compose/dokploy/Dockerfile
+    environment:
+      <<: *app-env
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
+    healthcheck:
+      test: [CMD, python, /app/deploy/healthcheck.py]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 120s
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  mcp:
+    <<: *app
+    environment: *app-env
+    command: [uvicorn, 'opendb.gateway.asgi:create_app', --factory, --host, 0.0.0.0, --port, '8001', --no-access-log]
+    volumes: [mcp_state:/state]
+    depends_on:
+      web:
+        condition: service_healthy
+      volume-init:
+        condition: service_completed_successfully
+
+  indexer:
+    <<: *app
+    environment: *app-env
+    command: [python, -m, opendb.vectors.worker, --model-file, /models/granite-97m-r2-q8_0.gguf]
+    volumes: [models:/models:ro]
+    depends_on:
+      web:
+        condition: service_healthy
+      model-init:
+        condition: service_completed_successfully
+      embeddings:
+        condition: service_healthy
+
+  volume-init:
+    <<: *app
+    restart: 'no'
+    user: '0:0'
+    cap_add: [CHOWN, FOWNER, DAC_OVERRIDE]
+    command: [sh, -ec, 'mkdir -p /state/oauth /models; chown -R 10001:10001 /state /models; chmod 0700 /state/oauth; chmod 0755 /models']
+    volumes: [mcp_state:/state, models:/models]
+
+  model-init:
+    <<: *app
+    restart: 'no'
+    environment:
+      OPENDB_MODEL_URL: ${OPENDB_MODEL_URL:-}
+    command: [python, /app/deploy/model-init.py]
+    volumes: [models:/models]
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+
+  embeddings:
+    # Official CPU server OCI index; includes linux/arm64 (see deployment.md).
+    image: ghcr.io/ggml-org/llama.cpp@sha256:cbcdcb52d484e08e23bfc0135afa5beadd2d540513bbb7c65b233231fa033ff4
+    platform: linux/arm64
+    restart: unless-stopped
+    user: '10001:10001'
+    networks: [app]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    volumes: [models:/models:ro]
+    command: [-m, /models/granite-97m-r2-q8_0.gguf, --embeddings, --pooling, mean, -c, '512', -t, '4', --host, 0.0.0.0, --port, '8080']
+    healthcheck:
+      test: [CMD, curl, -fsS, http://127.0.0.1:8080/health]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    depends_on:
+      model-init:
+        condition: service_completed_successfully
+
+  redis:
+    image: redis:7.4-alpine
+    platform: linux/arm64
+    restart: unless-stopped
+    networks: [app]
+    command: [redis-server, --save, '', --appendonly, 'no', --maxmemory, 256mb, --maxmemory-policy, allkeys-lru]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  gateway:
+    image: nginx:1.28-alpine@sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236
+    platform: linux/arm64
+    restart: unless-stopped
+    networks: [app, dokploy-network]
+    volumes:
+      - ./compose/dokploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      web:
+        condition: service_healthy
+      mcp:
+        condition: service_started
+
+volumes:
+  mcp_state:
+  models:
+
+networks:
+  # Private membership, but normal bridge NAT allows RDS/Google/model egress.
+  app:
+    driver: bridge
+  dokploy-network:
+    external: true

@@ -120,3 +120,10 @@ Documentación: [contratos](docs/implementation/contracts.md),
 [ingesta y catálogo](docs/implementation/ingestion.md), [vectores](docs/implementation/vectors.md),
 [API y MCP](docs/implementation/gateway.md), [diseño del MVP](docs/superpowers/specs/2026-09-13-mvp-design.md)
 y [decisiones](docs/superpowers/specs/2026-09-13-mvp-decisions.md).
+
+## Deployment on Dokploy and AWS
+
+See [the production deployment guide](docs/implementation/deployment.md) for the
+ARM64 Compose stack, private RDS connection, model initialization and OAuth setup.
+The [deployment state](docs/implementation/deployment-state.md) records resources
+prepared in Macaco's AWS account and the infrastructure prerequisites still pending.
