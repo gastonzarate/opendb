@@ -32,8 +32,7 @@ No se trasladaron transcripciones ni bases personales locales al ambiente nuevo.
   Traefik respondía 502 porque no estaba disponible el servicio del panel.
 - Antes de modificar el host se inició el snapshot EBS
   `snap-0c36fbdd29ff45f72` del volumen `vol-0c93ce4d1810f4812` (150 GiB).
-  Al verificar la recuperación, el snapshot seguía `pending`; no tratarlo como
-  backup terminado hasta que AWS indique `completed`.
+  AWS confirmó el snapshot `completed` al 100% al terminar el despliegue.
 - Se verificó una copia local privada de `/etc/dokploy`, el estado completo de
   Swarm, el volumen PostgreSQL 16 de Dokploy y su configuración Docker, junto
   con inventario de contenedores, imágenes, redes y volúmenes. Después de recuperar
@@ -63,20 +62,46 @@ No se trasladaron transcripciones ni bases personales locales al ambiente nuevo.
 Referencia de recuperación:
 [Docker Swarm administration](https://docs.docker.com/engine/swarm/admin_guide/).
 
-## Dominio y OAuth pendientes
+## OpenDB desplegado en Dokploy
 
-`opendb.macaco.ai` es una propuesta, aún no confirmada. No tiene registro A y el DNS
-se administra en Spaceship, fuera de Route 53 en esta cuenta. Para ese dominio:
+- Código de aplicación: `772d1d5` en `main`; fuente Git HTTPS pública.
+- Proyecto `OpenDB`: `vIVhfHSzjFWu7LlXlSkqR`.
+- Environment: `87sUKnStaVAwc5jI4TIVu`.
+- Compose: `GHSjp-IiqzhjHVo6WC9Ll`, nombre `opendb-dahhij`.
+- Deployment `DDHBloOyRwNKubGI59OKy`: `done`, terminado a las 03:50 UTC.
+- Imagen construida y ejecutada nativamente en ARM64:
+  `sha256:6d8d70b30dc152bbac843eea0a6e84428ad0fdd8e0f4ba616f287aa2345d56e8`.
+- Web, MCP, indexer, embeddings y Redis corriendo. Únicamente `gateway` está
+  conectado a `dokploy-network`; los demás comparten la red propia de OpenDB.
+- Web, Redis y embeddings saludables. Bootstrap y `/app/` devolvieron HTTP 200
+  usando resolución explícita del dominio a la IP del host. MCP POST sin token
+  devolvió 401. Estas comprobaciones omitieron validación del certificado porque
+  DNS/TLS público todavía no están configurados.
+- Prueba real en AWS: usuario/base sintéticos, ingesta con metadata descriptiva,
+  descubrimiento e indexación automática con el GGUF real, búsqueda híbrida con
+  pesos 0/50/100 y borrado físico. Usuario y base de prueba eliminados.
+- No se migraron datos de la base personal local. Sus siete tablas de dominio sí
+  recibieron etiquetas, descripciones y resúmenes locales; el fingerprint SQL
+  permaneció igual. El backup previo de metadata queda privado fuera de Git.
+
+## Dominio, certificado y OAuth pendientes
+
+`opendb.macaco.ai` quedó como dominio provisional, aún sin confirmación del usuario.
+No tiene registro A y el DNS se administra en Spaceship, fuera de Route 53 en esta
+cuenta. Para habilitar acceso público normal:
 
 - DNS: A `opendb` → `3.149.225.221`.
-- Dokploy: dominio HTTPS hacia servicio `gateway`, puerto 8080.
+- Dokploy: ya está creado el dominio HTTPS hacia `gateway`, puerto 8080,
+  ID `H5DSETGhhMS6LpvBo0W8l`. Su certificado está en `none` para no solicitar
+  certificados contra un DNS inexistente. Después de propagar el A, seleccionar
+  Let's Encrypt y redesplegar OpenDB; verificar HTTPS sin omitir el certificado.
 - Google OAuth: añadir las URLs exactas
   `https://opendb.macaco.ai/accounts/google/login/callback/` y
   `https://opendb.macaco.ai/auth/callback` al cliente configurado.
 - MCP público: `https://opendb.macaco.ai/mcp`.
 
-La infraestructura AWS creada genera cargos aunque el despliegue de aplicación
-esté pendiente. No hay todavía una instancia web OpenDB publicada en Dokploy.
+La infraestructura AWS creada genera cargos. La aplicación ya corre en Dokploy;
+el acceso por DNS público y el login Google de ese dominio siguen pendientes.
 
 ## Validación de RDS completada
 
@@ -90,7 +115,8 @@ recibe explícitamente INHERIT/SET sobre el rol propietario recién validado/cre
 la relación inversa no se concede. La prueba local confirma que el propietario
 no puede asumir el rol administrativo. pgvector disponible: 0.8.2.
 
-Validación final del código: 424 pruebas backend pasaron, 1 omitida; imagen
-x86_64 de producción compilada con el ajuste RDS; smoke ASGI/HTML/JS, permisos
-no-root, aislamiento de Compose, checksum/redacción del modelo y pre-commit pasaron.
-La ejecución nativa ARM64 y el login público siguen pendientes del despliegue real.
+Validación con metadata descriptiva: 444 pruebas backend pasaron, 1 omitida;
+54 pruebas frontend y 10 de navegador pasaron sobre los assets actualizados.
+Build, formatter, pre-commit, smoke ASGI/HTML/JS, permisos no-root, aislamiento de
+Compose y checksum/redacción del modelo pasaron. ARM64 y embeddings reales se
+verificaron en producción. El login Google público aún no se verificó.
