@@ -1188,3 +1188,95 @@ tbody tr:hover {
     transition: none !important;
   }
 }
+
+/* Connection guide: compact steps and readable copyable commands. */
+.connection-panel {
+  padding: 24px;
+  gap: 20px;
+}
+.connection-panel > .stack,
+.connection-panel > .form-row {
+  margin: 0;
+}
+.connection-panel .panel-head {
+  padding: 0;
+}
+.connection-panel > p {
+  padding: 0;
+}
+.connection-panel p {
+  line-height: 1.6;
+  margin: 0;
+}
+.connection-panel > ol {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+  margin: 0;
+  padding: 18px 18px 18px 34px;
+  background: #f4f8f3;
+  border-radius: 8px;
+  line-height: 1.5;
+}
+.connection-panel li strong {
+  display: block;
+}
+.connection-panel .connect-code {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #f8faf7;
+  color: inherit;
+  font:
+    12px/1.6 ui-monospace,
+    monospace;
+  resize: vertical;
+}
+.connection-panel a {
+  color: var(--green);
+}
+.connection-panel summary {
+  cursor: pointer;
+  line-height: 1.6;
+}
+.connection-panel details[open] > .stack {
+  margin-top: 16px;
+}
+@media (max-width: 720px) {
+  .connection-panel {
+    padding: 18px;
+  }
+  .connection-panel > ol {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.delete-database {
+  margin: 18px 20px;
+}
+.btn-danger {
+  color: #a32d25;
+  border-color: #d9aaa6;
+}
+.delete-dialog {
+  max-width: 440px;
+  width: calc(100% - 40px);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 28px;
+  color: var(--text);
+}
+.delete-dialog::backdrop {
+  background: #142b2266;
+}
+.delete-dialog p {
+  line-height: 1.6;
+}
+.delete-dialog-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 24px;
+  flex-wrap: wrap;
+}

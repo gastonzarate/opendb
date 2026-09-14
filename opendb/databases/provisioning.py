@@ -1,25 +1,49 @@
 """Administrative provisioning, never an executor for caller SQL."""
 
 import psycopg
-from django.conf import settings
+from django.db import transaction
 from psycopg import sql
 
 from .connections import connection_parameters
 from .credentials import derive_database_password
+from .lifecycle import database_lock
 from .models import PersonalDatabase
 
 
-def provision_personal_database(owner_id):
+def provision_personal_database(owner_id, *, recreate_deleted=False):
+    if not transaction.get_autocommit():
+        msg = "Provisioning requires control-database autocommit"
+        raise RuntimeError(msg)
     db, _ = PersonalDatabase.objects.get_or_create(owner_id=owner_id)
+    try:
+        return _provision(db, recreate_deleted=recreate_deleted)
+    except Exception:
+        # Includes initial admin-connection failures; never overwrite a concurrent
+        # worker's successful completion after it has released the advisory lock.
+        PersonalDatabase.objects.filter(
+            pk=db.pk, status__in=["pending", "failed"]
+        ).update(status="failed", error_code="provision_failed")
+        raise
+
+
+def _provision(db, *, recreate_deleted=False):  # noqa: C901 -- Explicit lifecycle states.
     password = derive_database_password(db.id)
-    with psycopg.connect(settings.OPENDB_ADMIN_DSN, autocommit=True) as admin:
-        admin.execute("SELECT pg_advisory_lock(%s)", (db.id.int % (2**63 - 1),))
+    with database_lock(db.id) as admin:
+        db.refresh_from_db()
+        if db.status == "ready":
+            return db
+        if db.status in {"deleting", "delete_failed"}:
+            if recreate_deleted:
+                msg = "Database deletion must finish before creating a database"
+                raise ValueError(msg)
+            return db
+        if db.status == "deleted" and not recreate_deleted:
+            return db
         try:
-            db.refresh_from_db()
-            if db.status == "ready":
-                return db
+            if db.status == "deleted":
+                db.onboarding_completed = False
             db.status, db.error_code = "provisioning", ""
-            db.save(update_fields=["status", "error_code"])
+            db.save(update_fields=["status", "error_code", "onboarding_completed"])
             marker = f"opendb:{db.id}"
             role = admin.execute(
                 "SELECT oid, shobj_description(oid, 'pg_authid') FROM pg_roles "
@@ -120,6 +144,4 @@ def provision_personal_database(owner_id):
             db.status, db.error_code = "failed", "provision_failed"
             db.save(update_fields=["status", "error_code"])
             raise
-        finally:
-            admin.execute("SELECT pg_advisory_unlock(%s)", (db.id.int % (2**63 - 1),))
     return db

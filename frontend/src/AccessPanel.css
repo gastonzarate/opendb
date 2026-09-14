@@ -1,0 +1,47 @@
+.access-panel .access-layout {
+  display: grid;
+  grid-template-columns: minmax(180px, 280px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.access-panel .access-role-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: white;
+  color: inherit;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.access-panel .access-role-card[aria-pressed="true"] {
+  border-color: var(--green);
+  box-shadow: inset 3px 0 var(--green);
+  background: #f0faf4;
+}
+.access-panel .access-role-card:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 3px;
+}
+.access-panel .access-role-card:disabled {
+  cursor: wait;
+}
+.access-panel .access-role-card span {
+  white-space: pre-wrap;
+}
+.access-panel .access-role-card small {
+  color: var(--muted);
+}
+.access-panel textarea {
+  width: 100%;
+  min-width: 0;
+  resize: vertical;
+}
+@media (max-width: 760px) {
+  .access-panel .access-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

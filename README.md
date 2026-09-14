@@ -13,6 +13,10 @@ semántica con indexación asíncrona y reintentos cuando cambia el texto.
 
 ## Arranque local
 
+El entorno actual por dominio usa también `docker-compose.domain.yml`. Para
+reiniciarlo, seguí [la configuración del gateway](docs/implementation/web.md#entorno-actual-web-y-mcp-en-el-mismo-dominio).
+Los comandos de abajo corresponden al modo local sin gateway.
+
 Requisitos: Docker Engine, Docker Compose v2 y Python 3 para los scripts.
 Desde este directorio, prepara la configuración sin sobrescribir claves existentes:
 

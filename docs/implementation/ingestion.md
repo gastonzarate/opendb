@@ -196,12 +196,17 @@ connection to `opendb_catalog.ingestion_operations`; restricted generic SQL cann
 that table. Annotations use relation OID/attribute number, so renaming an object keeps
 its annotation and replacing an object does not inherit an old object's description.
 
-`indexing` is a **commit-time snapshot**, with status `not_requested`, `pending`,
-`ready` or `failed` and relevant registered index summaries. Existing vector change
-capture runs in the same transaction as records. No embedding/model call runs in
-ingestion; unregistered tables remain `not_requested`. A retry returns the historical
-snapshot; use the separate vector status action for current worker progress. Mixed
-indexes report pending before failed before ready; individual counts remain available.
+`indexing` is a **commit-time snapshot**, with status `queued_for_discovery`,
+`pending`, `failed`, or `unavailable`, and relevant registered index summaries.
+When vector infrastructure is available, `automatic_discovery: pending` records
+that the worker still needs to inspect eligible columns. Even ready older indexes
+do not establish coverage of newly written columns. Existing vector change capture
+runs in the same transaction as records; no embedding/model call runs in ingestion.
+The worker automatically discovers narrative and long-text columns (see
+[vectors.md](vectors.md#automatic-discovery)). A retry returns the historical
+snapshot; use vector status for current registered-index progress. Mixed registered
+indexes report pending before failed; individual counts remain available. Missing
+vector infrastructure reports `unavailable` without implying the source write failed.
 
 ## Working examples
 

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { FormEvent } from "react";
 import { api } from "./api";
 import type { DataObject } from "./types";
 
@@ -7,12 +6,6 @@ type PanelProps = {
   databaseId: string;
   objects: DataObject[];
   isOwner: boolean;
-};
-type AccessRole = {
-  id: string;
-  name: string;
-  objects: string[];
-  emails: string[];
 };
 type VectorIndex = {
   index_id: string;
@@ -81,236 +74,7 @@ function RequestError({ error }: { error: string }) {
   ) : null;
 }
 
-export function AccessPanel({ databaseId, objects, isOwner }: PanelProps) {
-  // Keep owner-only state in a child so changing ownership also cancels pending work.
-  return isOwner ? (
-    <OwnerAccess databaseId={databaseId} objects={objects} />
-  ) : (
-    <section className="panel" aria-label="Accesos">
-      <h2>Accesos</h2>
-      <p className="empty">
-        Solo el propietario puede administrar los roles y permisos de esta base
-        de datos.
-      </p>
-    </section>
-  );
-}
-
-function OwnerAccess({ databaseId, objects }: Omit<PanelProps, "isOwner">) {
-  const [roles, setRoles] = useState<AccessRole[] | null>(null);
-  const { pending, error, run } = useRequest();
-  const refresh = useCallback(
-    () =>
-      run(async (current) => {
-        const result = await api<AccessRole[]>("list_access", {
-          database_id: databaseId,
-        });
-        if (current()) setRoles(result);
-      }),
-    [databaseId, run],
-  );
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  const mutate = (
-    action: string,
-    payload: Record<string, unknown>,
-    form?: HTMLFormElement,
-  ) => {
-    void run(async (current) => {
-      await api(action, payload);
-      if (!current()) return;
-      // Mutations may return null or partial records. Always read authoritative roles.
-      const result = await api<AccessRole[]>("list_access", {
-        database_id: databaseId,
-      });
-      if (current()) {
-        setRoles(result);
-        form?.reset();
-      }
-    });
-  };
-  const create = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const name = String(new FormData(form).get("name") ?? "").trim();
-    if (name) mutate("create_role", { database_id: databaseId, name }, form);
-  };
-
-  return (
-    <section className="panel stack" aria-label="Accesos">
-      <div className="panel-head">
-        <div>
-          <h2>Accesos</h2>
-          <p className="muted">
-            Comparte tablas y vistas mediante roles de lectura.
-          </p>
-        </div>
-        <button
-          className="btn"
-          disabled={pending}
-          onClick={() => void refresh()}
-        >
-          Actualizar accesos
-        </button>
-      </div>
-      <RequestError error={error} />
-      {pending && (
-        <p role="status">
-          {roles === null ? "Cargando accesos…" : "Actualizando accesos…"}
-        </p>
-      )}
-      <form className="form-row" onSubmit={create}>
-        <label className="field">
-          Nombre del rol
-          <input name="name" required maxLength={100} disabled={pending} />
-        </label>
-        <button className="btn btn-primary" disabled={pending}>
-          Crear rol
-        </button>
-      </form>
-      {roles?.length === 0 && (
-        <p className="empty">
-          No hay roles. Crea uno para compartir el acceso.
-        </p>
-      )}
-      <div className="stack">
-        {roles?.map((role) => {
-          const available = objects.filter(
-            (object) =>
-              ["table", "view"].includes(object.kind) &&
-              !role.objects.includes(object.name),
-          );
-          return (
-            <section
-              className="panel stack"
-              key={role.id}
-              aria-label={`Rol ${role.name}`}
-            >
-              <h3>{role.name}</h3>
-              <div>
-                <h4>Objetos compartidos</h4>
-                {role.objects.length === 0 && (
-                  <p className="muted">Sin objetos compartidos.</p>
-                )}
-                {role.objects.map((name) => (
-                  <span className="chip" key={name}>
-                    {name}{" "}
-                    <button
-                      className="btn btn-small"
-                      disabled={pending}
-                      aria-label={`Revocar acceso a ${name} del rol ${role.name}`}
-                      onClick={() =>
-                        mutate("revoke_object", {
-                          role_id: role.id,
-                          object_name: name,
-                        })
-                      }
-                    >
-                      Quitar
-                    </button>
-                  </span>
-                ))}
-              </div>
-              <form
-                className="form-row"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  const form = event.currentTarget;
-                  const object = String(new FormData(form).get("object") ?? "");
-                  if (available.some((item) => item.name === object))
-                    mutate(
-                      "grant_object",
-                      { role_id: role.id, object_name: object },
-                      form,
-                    );
-                }}
-              >
-                <label className="field">
-                  Objeto para {role.name}
-                  <select
-                    name="object"
-                    required
-                    defaultValue=""
-                    disabled={pending || available.length === 0}
-                  >
-                    <option value="">
-                      {available.length
-                        ? "Selecciona una tabla o vista"
-                        : "No hay objetos disponibles"}
-                    </option>
-                    {available.map((object) => (
-                      <option key={object.name} value={object.name}>
-                        {object.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <button
-                  className="btn"
-                  disabled={pending || available.length === 0}
-                >
-                  Conceder acceso
-                </button>
-              </form>
-              <div>
-                <h4>Personas</h4>
-                {role.emails.length === 0 && (
-                  <p className="muted">Sin personas asignadas.</p>
-                )}
-                {role.emails.map((email) => (
-                  <span className="chip" key={email}>
-                    {email}{" "}
-                    <button
-                      className="btn btn-small"
-                      disabled={pending}
-                      aria-label={`Quitar a ${email} del rol ${role.name}`}
-                      onClick={() =>
-                        mutate("revoke_role", { role_id: role.id, email })
-                      }
-                    >
-                      Quitar
-                    </button>
-                  </span>
-                ))}
-              </div>
-              <form
-                className="form-row"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  const form = event.currentTarget;
-                  const email = String(
-                    new FormData(form).get("email") ?? "",
-                  ).trim();
-                  if (email)
-                    mutate("assign_role", { role_id: role.id, email }, form);
-                }}
-              >
-                <label className="field">
-                  Correo para {role.name}
-                  <input
-                    name="email"
-                    type="email"
-                    required
-                    disabled={pending}
-                  />
-                </label>
-                <button className="btn" disabled={pending}>
-                  Invitar
-                </button>
-              </form>
-              <p className="muted">
-                La persona obtiene acceso al iniciar sesión con ese correo. Esta
-                acción no envía un mensaje.
-              </p>
-            </section>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
+export { AccessPanel } from "./AccessPanel";
 
 const textType = (type: string) =>
   /^(text|character varying|varchar|character|char|bpchar)(\(\d+\))?$/.test(
@@ -382,8 +146,8 @@ export function VectorPanel({ databaseId, objects, isOwner }: PanelProps) {
         <div>
           <h2>Vectores</h2>
           <p className="muted">
-            Indexa texto y busca por significado en los datos que puedes
-            consultar.
+            Los textos largos y las transcripciones se indexan automáticamente.
+            Acá podés revisar su estado y buscar por significado.
           </p>
         </div>
         <button
@@ -402,7 +166,7 @@ export function VectorPanel({ databaseId, objects, isOwner }: PanelProps) {
       )}
       {isOwner && (
         <section className="stack" aria-label="Registro de índices">
-          <h3>Registrar texto</h3>
+          <h3>Agregar otro campo (opcional)</h3>
           <p className="muted">
             Selecciona una tabla con clave primaria simple de tipo entero, UUID
             o texto. El servidor comprueba que sea compatible antes de
@@ -622,84 +386,4 @@ export function VectorPanel({ databaseId, objects, isOwner }: PanelProps) {
   );
 }
 
-export function ConnectPanel({ mcpUrl }: { mcpUrl: string }) {
-  const [copied, setCopied] = useState(false);
-  const { pending, error, run } = useRequest();
-  useEffect(() => {
-    setCopied(false);
-  }, [mcpUrl]);
-  return (
-    <section className="panel stack" aria-label="Conectar un asistente">
-      <div className="panel-head">
-        <div>
-          <h2>Conectar un asistente</h2>
-          <p className="muted">
-            Usa el servidor MCP para trabajar con tus datos desde un asistente
-            compatible.
-          </p>
-        </div>
-      </div>
-      <div className="form-row">
-        <label className="field">
-          URL del servidor MCP
-          <input
-            type="url"
-            readOnly
-            value={mcpUrl}
-            onFocus={(event) => event.currentTarget.select()}
-          />
-        </label>
-        <button
-          className="btn btn-primary"
-          disabled={pending || !mcpUrl}
-          onClick={() => {
-            setCopied(false);
-            void run(async (current) => {
-              try {
-                if (!navigator.clipboard?.writeText)
-                  throw new Error("Portapapeles no disponible");
-                await navigator.clipboard.writeText(mcpUrl);
-              } catch {
-                throw new Error(
-                  "No se pudo copiar la URL. Selecciónala y cópiala manualmente.",
-                );
-              }
-              if (current()) setCopied(true);
-            });
-          }}
-        >
-          {pending ? "Copiando…" : "Copiar URL"}
-        </button>
-      </div>
-      {!mcpUrl && (
-        <p className="empty">
-          La URL del servidor MCP todavía no está disponible.
-        </p>
-      )}
-      <RequestError error={error} />
-      {copied && <p role="status">URL copiada.</p>}
-      <ol>
-        <li>
-          Abre la configuración de conexiones o herramientas de tu asistente y
-          añade un servidor MCP remoto.
-        </li>
-        <li>
-          Pega esta URL y elige el transporte HTTP transmisible (Streamable
-          HTTP) y la autenticación OAuth si el cliente lo solicita.
-        </li>
-        <li>
-          Inicia sesión en OpenDB y autoriza la conexión cuando se abra la
-          pantalla de autenticación.
-        </li>
-        <li>
-          Pide al asistente que liste tus bases de datos y describa las tablas y
-          vistas disponibles. Indica con cuál quieres trabajar.
-        </li>
-      </ol>
-      <p className="muted">
-        El asistente utiliza los permisos de tu cuenta. Las personas invitadas
-        solo pueden consultar los objetos que se les hayan compartido.
-      </p>
-    </section>
-  );
-}
+export { ConnectPanel } from "./ConnectPanel";

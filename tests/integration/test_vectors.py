@@ -478,7 +478,7 @@ def test_live_model_semantic_pgvector_search(owner_conn, admin_conn, personal_db
         owner_conn, index["index_id"], "Where is the cat sleeping?", embedder=embedder
     )
     assert [h["source_key"] for h in hits] == [1, 2, 3]
-    assert hits[0]["score"] > hits[2]["score"] + 0.1
+    assert hits[0]["semantic_score"] > hits[2]["semantic_score"] + 0.1
 
 
 def test_grant_revocation_during_query_embedding_is_rechecked(registered, admin_conn):
@@ -967,3 +967,304 @@ def test_source_rewrite_without_row_trigger_never_returns_stale_text(
         )
         == []
     )
+
+
+@pytest.mark.parametrize(
+    "weight", [True, False, "50", None, -1, 101, float("nan"), float("inf")]
+)
+def test_hybrid_invalid_weights(registered, owner_conn, weight):
+    from opendb import vectors
+
+    with pytest.raises(ValueError, match="weight"):
+        vectors.search(
+            owner_conn, registered["index_id"], "cat", semantic_weight=weight
+        )
+
+
+def test_hybrid_endpoints_and_no_inference(
+    registered, owner_conn, admin_conn, monkeypatch
+):
+    from opendb import vectors
+    from opendb.vectors import retrieval
+
+    vectors.process_pending(admin_conn, FakeEmbedder())
+
+    class Opposite(FakeEmbedder):
+        def embed(self, text):
+            assert text == "cat"
+            return super().embed("dog")
+
+    semantic = vectors.search(
+        owner_conn,
+        registered["index_id"],
+        "cat",
+        embedder=Opposite(),
+        semantic_weight=100,
+    )
+    assert [h["source_key"] for h in semantic] == [2, 1]
+    assert semantic[0]["score"] == pytest.approx(1)
+    assert semantic[0]["semantic_rank"] == 1
+    hybrid = vectors.search(
+        owner_conn, registered["index_id"], "cat", embedder=Opposite()
+    )
+    assert [h["source_key"] for h in hybrid] == [1, 2]
+    assert hybrid[0]["score"] == pytest.approx(61 * (0.5 / 62 + 0.5 / 61))
+    assert hybrid[1]["lexical_rank"] is None
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Lexical search must not construct an embedder")
+
+    monkeypatch.setattr(retrieval, "LocalEmbedder", forbidden)
+    lexical = vectors.search(
+        owner_conn, registered["index_id"], "cat", semantic_weight=0
+    )
+    assert [h["source_key"] for h in lexical] == [1]
+    assert lexical[0]["score"] == pytest.approx(1)
+    assert lexical[0]["semantic_rank"] is None
+    assert (
+        vectors.search(
+            owner_conn, registered["index_id"], "unmatched", semantic_weight=0
+        )
+        == []
+    )
+    assert (
+        vectors.search(
+            owner_conn,
+            registered["index_id"],
+            "cat",
+            semantic_weight=0,
+            filters={"label": "private"},
+        )
+        == []
+    )
+    owner_conn.execute("UPDATE data.notes SET body='cat changed' WHERE id=1")
+    assert (
+        vectors.search(owner_conn, registered["index_id"], "cat", semantic_weight=0)
+        == []
+    )
+
+
+def test_hybrid_redacted_view_lexical_and_model(registered, owner_conn, admin_conn):
+    from opendb import vectors
+
+    vectors.process_pending(admin_conn, FakeEmbedder())
+    with restricted(admin_conn) as (guest, role):
+        owner_conn.execute(
+            sql.SQL("""
+            CREATE VIEW data.hybrid_shared WITH (security_barrier=true) AS
+            SELECT index_id,source_key,version,chunk_order,char_start,char_end,
+                   token_start,token_end,'redacted'::text AS text,embedding,model_id
+            FROM data.{} WHERE source_key='2'::jsonb
+        """).format(sql.Identifier(registered["view_name"]))
+        )
+        admin_conn.execute(
+            sql.SQL("GRANT SELECT ON data.hybrid_shared TO {}").format(
+                sql.Identifier(role)
+            )
+        )
+        admin_conn.execute(
+            sql.SQL("GRANT USAGE ON SCHEMA public TO {}").format(sql.Identifier(role))
+        )
+        assert (
+            vectors.search(
+                guest,
+                registered["index_id"],
+                "dog",
+                target_view="hybrid_shared",
+                semantic_weight=0,
+            )
+            == []
+        )
+        hits = vectors.search(
+            guest,
+            registered["index_id"],
+            "redacted",
+            target_view="hybrid_shared",
+            semantic_weight=0,
+        )
+        assert [h["source_key"] for h in hits] == [2]
+        assert hits[0]["lexical_rank"] == 1
+        other = FakeEmbedder()
+        other.model_id = "wrong-model"
+        with pytest.raises(
+            (ValueError, psycopg.errors.InvalidParameterValue), match="model"
+        ):
+            vectors.search(
+                guest,
+                registered["index_id"],
+                "redacted",
+                target_view="hybrid_shared",
+                embedder=other,
+            )
+
+
+def test_hybrid_timeout_preserves_stricter_caller_limit(owner_conn):
+    from opendb.vectors.query_timeout import query_timeout
+
+    owner_conn.execute("SET statement_timeout='20ms'")
+    with pytest.raises(psycopg.errors.QueryCanceled), query_timeout(owner_conn):
+        owner_conn.execute("SELECT pg_sleep(0.1)")
+    assert owner_conn.execute("SHOW statement_timeout").fetchone()[0] == "20ms"
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        (None, None, 10, "cat", None, {}),
+        (None, None, 10, "cat", float("nan"), {}),
+        (None, None, 10, "cat", float("inf"), {}),
+        (None, None, 10, None, 0, {}),
+        (None, None, 10, "cat", 100, {}),
+        ("[1,2]", MODEL_ID, 10, "cat", 100, {}),
+        (None, "wrong", 10, "cat", 0, {}),
+        (None, None, None, "cat", 0, {}),
+        (None, None, 10, "cat", 0, None),
+    ],
+)
+def test_hybrid_raw_sql_validates_inputs(registered, owner_conn, arguments):
+    from psycopg.types.json import Jsonb
+
+    vector, model, limit, query, weight, filters = arguments
+    with pytest.raises(psycopg.errors.InvalidParameterValue):
+        owner_conn.execute(
+            "SELECT opendb_catalog.hybrid_search(%s,%s,%s,%s,%s,%s,%s)",
+            (
+                registered["index_id"],
+                vector,
+                model,
+                limit,
+                query,
+                weight,
+                Jsonb(filters),
+            ),
+        )
+
+
+def test_hybrid_install_idempotent_and_legacy_cosine(
+    registered, owner_conn, admin_conn, personal_db
+):
+    import json
+
+    from opendb import vectors
+
+    vectors.process_pending(admin_conn, FakeEmbedder())
+    before = vectors.search(
+        owner_conn, registered["index_id"], "cat", semantic_weight=0
+    )
+    vectors.install(admin_conn, personal_db.role_name)
+    vectors.install(admin_conn, personal_db.role_name)
+    assert (
+        vectors.search(owner_conn, registered["index_id"], "cat", semantic_weight=0)
+        == before
+    )
+    assert vectors.process_pending(admin_conn, FakeEmbedder())["processed"] == 0
+    for suffix in ("", ", '{}'::jsonb"):
+        hits = owner_conn.execute(
+            "SELECT opendb_catalog.vector_search(%s,%s,%s,10" + suffix + ")",
+            (registered["index_id"], json.dumps(FakeEmbedder().embed("cat")), MODEL_ID),
+        ).fetchall()
+        assert hits[0][0]["score"] == pytest.approx(1)
+        assert hits[1][0]["score"] < 0.02
+
+
+@pytest.mark.parametrize("weight", [0, 50, 100])
+def test_hybrid_query_length_bound(registered, owner_conn, weight):
+    from opendb import vectors
+
+    with pytest.raises(ValueError, match="16384"):
+        vectors.search(
+            owner_conn,
+            registered["index_id"],
+            "x" * 16385,
+            semantic_weight=weight,
+            embedder=FakeEmbedder(),
+        )
+
+
+def test_hybrid_decimal_nan_rejected(registered, owner_conn):
+    from decimal import Decimal
+
+    from opendb import vectors
+
+    with pytest.raises(ValueError, match="weight"):
+        vectors.search(
+            owner_conn, registered["index_id"], "cat", semantic_weight=Decimal("NaN")
+        )
+
+
+def test_hybrid_null_projected_text_has_no_lexical_rank(
+    registered, owner_conn, admin_conn
+):
+    from opendb import vectors
+
+    vectors.process_pending(admin_conn, FakeEmbedder())
+    owner_conn.execute(
+        sql.SQL("""
+        CREATE VIEW data.null_text AS
+        SELECT index_id,source_key,version,chunk_order,char_start,char_end,
+               token_start,token_end,
+               CASE WHEN source_key='1'::jsonb THEN NULL ELSE 'cat' END AS text,
+               embedding,model_id FROM data.{}
+    """).format(sql.Identifier(registered["view_name"]))
+    )
+    hits = vectors.search(
+        owner_conn,
+        registered["index_id"],
+        "cat",
+        target_view="null_text",
+        semantic_weight=0,
+    )
+    assert [h["source_key"] for h in hits] == [2]
+    assert hits[0]["lexical_rank"] == 1
+    assert hits[0]["score"] == pytest.approx(1)
+
+
+def test_hybrid_lexical_view_query_is_timed_out(registered, owner_conn, admin_conn):
+    from opendb import vectors
+
+    vectors.process_pending(admin_conn, FakeEmbedder())
+    owner_conn.execute(
+        sql.SQL("""
+        CREATE VIEW data.slow_text AS
+        SELECT index_id,source_key,version,chunk_order,char_start,char_end,
+               token_start,token_end,
+               CASE WHEN pg_sleep(0.1) IS NULL THEN text ELSE text END AS text,
+               embedding,model_id FROM data.{}
+    """).format(sql.Identifier(registered["view_name"]))
+    )
+    owner_conn.execute("SET statement_timeout='20ms'")
+    with pytest.raises(psycopg.errors.QueryCanceled):
+        vectors.search(
+            owner_conn,
+            registered["index_id"],
+            "cat",
+            target_view="slow_text",
+            semantic_weight=0,
+        )
+    assert owner_conn.execute("SHOW statement_timeout").fetchone()[0] == "20ms"
+
+
+def test_hybrid_raw_lexical_query_bounds_and_authorization(
+    registered, owner_conn, admin_conn
+):
+    from opendb import vectors
+
+    vectors.process_pending(admin_conn, FakeEmbedder())
+    with pytest.raises(psycopg.errors.InvalidParameterValue, match="16384"):
+        owner_conn.execute(
+            "SELECT opendb_catalog.hybrid_search(%s,NULL,NULL,10,%s,0)",
+            (registered["index_id"], "x" * 16385),
+        )
+    with (
+        restricted(admin_conn) as (guest, _role),
+        pytest.raises(psycopg.errors.InsufficientPrivilege),
+    ):
+        guest.execute(
+            "SELECT opendb_catalog.hybrid_search(%s,NULL,NULL,10,'cat',0)",
+            (registered["index_id"],),
+        ).fetchall()
+    owner_conn.execute(
+        "SELECT opendb_catalog.hybrid_search(%s,NULL,NULL,10,%s,0)",
+        (registered["index_id"], "cat'); DROP TABLE data.notes; --"),
+    ).fetchall()
+    assert owner_conn.execute("SELECT count(*) FROM data.notes").fetchone()[0] == 2

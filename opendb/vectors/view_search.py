@@ -93,6 +93,8 @@ def search_view(  # noqa: PLR0913 - mirrors validated retrieval options.
     model_id,
     limit,
     filters,
+    query,
+    semantic_weight,
 ):
     name, oid = target
     # A second check catches source invalidation and revocation during inference.
@@ -101,8 +103,24 @@ def search_view(  # noqa: PLR0913 - mirrors validated retrieval options.
     ).fetchone()[0]:
         msg = "Vector index or target view unavailable"
         raise PermissionError(msg)
+    configured_model = conn.execute(
+        "SELECT opendb_catalog.vector_view_model(%s,%s)", (index_id, oid)
+    ).fetchone()[0]
+    if model_id is not None and model_id != configured_model:
+        msg = "Embedding model mismatch"
+        raise ValueError(msg)
+    model_id = configured_model
     conditions = []
-    parameters = [vector, index_id, model_id, index_id, oid]
+    parameters = [
+        vector,
+        query,
+        semantic_weight,
+        index_id,
+        model_id,
+        model_id,
+        index_id,
+        oid,
+    ]
     for field, value in filters.items():
         conditions.append(
             sql.SQL(
@@ -115,14 +133,43 @@ def search_view(  # noqa: PLR0913 - mirrors validated retrieval options.
     # Never execute this view using privileged_connection / SECURITY DEFINER:
     # both PostgreSQL grants and any view projection (including redaction) apply.
     statement = sql.SQL("""
-        SELECT v.index_id,v.source_key,v.version,v.chunk_order,v.char_start,v.char_end,
+        WITH candidates AS MATERIALIZED (
+        SELECT q.weight,v.index_id,v.source_key,v.version,v.chunk_order,
+               v.char_start,v.char_end,
                v.token_start,v.token_end,v.text,
-               1-(v.embedding OPERATOR(public.<=>) q.embedding) AS score
-        FROM data.{} v CROSS JOIN (SELECT %s::public.vector AS embedding) q
-        WHERE v.index_id=%s AND v.model_id=%s
+               CASE WHEN q.weight>0 THEN
+                    1-(v.embedding OPERATOR(public.<=>) q.embedding)
+               END AS semantic_score,
+               CASE WHEN q.weight<100 THEN
+                    ts_rank_cd(to_tsvector('pg_catalog.simple',v.text),q.lexical)
+               END AS lexical_score,
+               CASE WHEN q.weight<100 THEN
+                    to_tsvector('pg_catalog.simple',v.text) @@ q.lexical
+               ELSE false END AS lexical_match
+        FROM data.{} v CROSS JOIN (SELECT %s::public.vector AS embedding,
+             websearch_to_tsquery('pg_catalog.simple',%s) AS lexical,
+             %s::double precision AS weight) q
+        WHERE v.index_id=%s AND (%s::text IS NULL OR v.model_id=%s)
           AND opendb_catalog.vector_view_visible(%s,%s) AND {}
-        ORDER BY v.embedding OPERATOR(public.<=>) q.embedding,v.source_key,v.chunk_order
-        LIMIT %s
+        ), ranked AS (
+            SELECT *,
+                CASE WHEN weight>0 THEN row_number() OVER (
+                    ORDER BY semantic_score DESC NULLS LAST,source_key,chunk_order
+                ) END AS semantic_rank,
+                CASE WHEN lexical_match THEN row_number() OVER (
+                    ORDER BY lexical_match DESC NULLS LAST,
+                             lexical_score DESC NULLS LAST,source_key,chunk_order
+                ) END AS lexical_rank
+            FROM candidates
+        ), scored AS (
+            SELECT *,61*(coalesce((weight/100.0)/(60+semantic_rank),0)+
+                         coalesce((1-weight/100.0)/(60+lexical_rank),0)) AS score
+            FROM ranked WHERE weight>0 OR lexical_match
+        )
+        SELECT index_id,source_key,version,chunk_order,char_start,char_end,
+               token_start,token_end,text,score,semantic_score,lexical_score,
+               semantic_rank,lexical_rank
+        FROM scored ORDER BY score DESC,source_key,chunk_order LIMIT %s
     """).format(sql.Identifier(name), predicate)
     keys = [
         "index_id",
@@ -135,6 +182,10 @@ def search_view(  # noqa: PLR0913 - mirrors validated retrieval options.
         "token_end",
         "text",
         "score",
+        "semantic_score",
+        "lexical_score",
+        "semantic_rank",
+        "lexical_rank",
     ]
     results = [
         dict(zip(keys, row, strict=True)) for row in conn.execute(statement, parameters)

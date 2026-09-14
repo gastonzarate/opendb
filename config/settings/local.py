@@ -13,7 +13,11 @@ SECRET_KEY = env(
     default="TjONKujFSJ0L0kdRgjnBASFSPHyaylD7eIzq7eKW78yVoaxEIP38T25EzWN47wpx",
 )
 # https://docs.djangoproject.com/en/dev/ref/settings/#allowed-hosts
-ALLOWED_HOSTS = ["localhost", "0.0.0.0", "127.0.0.1"]  # noqa: S104
+ALLOWED_HOSTS = ["*"]
+
+# Enable only behind a trusted HTTPS proxy such as Tailscale Serve.
+if env.bool("DJANGO_TRUST_HTTPS_PROXY", default=False):
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 # CACHES
 # ------------------------------------------------------------------------------

@@ -104,17 +104,21 @@ def _database_error(exc):
 def _indexing(cur, tables):
     cur.execute("SELECT pg_catalog.to_regprocedure('opendb_catalog.vector_status()')")
     if cur.fetchone()[0] is None:
-        return {"status": "not_requested", "indexes": []}
+        return {
+            "status": "unavailable",
+            "indexes": [],
+            "automatic_discovery": "unavailable",
+        }
     cur.execute("SELECT opendb_catalog.vector_status()")
     indexes = [row[0] for row in cur.fetchall() if row[0]["table"] in tables]
-    state = "not_requested"
+    state = "queued_for_discovery"
     if indexes:
-        state = "ready"
         if any(index["failed"] for index in indexes):
             state = "failed"
         if any(index["pending"] or index["processing"] for index in indexes):
             state = "pending"
-    return {"status": state, "indexes": indexes}
+    # Existing ready indexes cannot establish coverage of newly written columns.
+    return {"status": state, "indexes": indexes, "automatic_discovery": "pending"}
 
 
 def apply(conn, operation):

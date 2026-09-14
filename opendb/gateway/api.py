@@ -18,6 +18,7 @@ from django.views.decorators.http import require_GET
 from django.views.decorators.http import require_POST
 
 from .contract import ACTIONS
+from .contract import WEB_ONLY_ACTIONS
 from .contract import dispatch
 from .contract import validate_payload
 
@@ -71,7 +72,7 @@ def action(request, action):  # noqa: PLR0911 -- Explicit HTTP failure responses
     actor_id = session_actor(request)
     if actor_id is None:
         return _error("authentication_required", "Sign in with Google.", 401)
-    if action not in ACTIONS:
+    if action not in ACTIONS and action not in WEB_ONLY_ACTIONS:
         return _error("unknown_action", "Unknown action.", 404)
     if request.content_type != "application/json":
         return _error("invalid_content_type", "Send application/json.", 415)

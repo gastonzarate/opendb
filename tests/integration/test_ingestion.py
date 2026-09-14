@@ -81,7 +81,7 @@ def test_atomic_expenses_source_metadata_and_replay(
     operation = expense_operation(owner_conn)
     result = ingestion.apply(owner_conn, operation)
     assert result["records"]["expense"]["amount"] == "12.50"
-    assert result["indexing"]["status"] == "not_requested"
+    assert result["indexing"]["status"] == "queued_for_discovery"
     assert ingestion.apply(owner_conn, copy.deepcopy(operation)) == result
     assert owner_conn.execute(
         "SELECT count(*), min(spent_on) FROM data.expenses"
@@ -515,3 +515,35 @@ def test_exported_examples_execute_and_replay(owner_conn, admin_conn, kind):
             (1, "Unknown speaker", None, "Hello.", None),
             (2, "Alice", None, "Welcome.", "3.000"),
         ]
+
+
+def test_ready_existing_index_does_not_claim_new_column_is_indexed(
+    owner_conn, admin_conn
+):
+    from opendb import vectors
+    from tests.integration.test_vectors import FakeEmbedder
+
+    owner_conn.execute("CREATE TABLE data.notes (id int PRIMARY KEY, body text)")
+    owner_conn.execute("INSERT INTO data.notes VALUES (1,'existing')")
+    vectors.register(admin_conn, "notes", "id", "body")
+    vectors.process_pending(admin_conn, FakeEmbedder())
+    operation = expense_operation(owner_conn, "new-column")
+    operation["annotations"] = []
+    operation["statements"] = ["ALTER TABLE data.notes ADD COLUMN transcript text"]
+    operation["records"] = [
+        {
+            "table": "notes",
+            "ref": "note",
+            "returning": ["id"],
+            "values": {
+                "id": typed("integer", 1),
+                "transcript": typed("text", "new turn"),
+            },
+            "on_conflict": {"columns": ["id"], "update": ["transcript"]},
+        }
+    ]
+    result = ingestion.apply(owner_conn, operation)
+    assert result["indexing"]["indexes"][0]["ready"] == 1
+    assert result["indexing"]["status"] == "queued_for_discovery"
+    assert result["indexing"]["automatic_discovery"] == "pending"
+    assert ingestion.apply(owner_conn, copy.deepcopy(operation)) == result

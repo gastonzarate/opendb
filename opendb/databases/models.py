@@ -1,6 +1,7 @@
 import uuid
 
 from django.conf import settings
+from django.core.validators import MaxLengthValidator
 from django.db import models
 
 
@@ -11,6 +12,7 @@ class PersonalDatabase(models.Model):
     role_name = models.CharField(max_length=63, unique=True, editable=False)
     status = models.CharField(max_length=16, default="pending")
     error_code = models.CharField(max_length=64, blank=True)
+    onboarding_completed = models.BooleanField(default=False)
 
     def __str__(self):
         return self.database_name
@@ -25,6 +27,9 @@ class AccessRole(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     database = models.ForeignKey(PersonalDatabase, on_delete=models.CASCADE)
     name = models.CharField(max_length=100)
+    description = models.TextField(
+        blank=True, default="", validators=[MaxLengthValidator(2000)]
+    )
 
     class Meta:
         constraints = [

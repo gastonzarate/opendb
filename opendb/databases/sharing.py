@@ -17,11 +17,16 @@ from .connections import privileged_connection
 from .connections import require_owner
 from .credentials import derive_database_password
 from .exceptions import DatabaseAccessDenied
+from .exceptions import DatabaseNotReady
+from .lifecycle import database_lock
 from .models import AccessRole
 from .models import ObjectGrant
+from .models import PersonalDatabase
 from .models import RoleAssignment
 
 MAX_ROLE_NAME = 100
+MAX_ROLE_DESCRIPTION = 2000
+_UNSET = object()
 
 
 @contextmanager
@@ -29,12 +34,17 @@ def sharing_lock(database_id):
     if not transaction.get_autocommit():
         msg = "Sharing operations require control-database autocommit"
         raise RuntimeError(msg)
-    with privileged_connection(database_id) as conn, conn.transaction():
-        conn.execute("SET LOCAL lock_timeout = '5s'")
-        key = UUID(str(database_id)).int % (2**63 - 1)
-        conn.execute("SELECT pg_advisory_xact_lock(%s)", (key,))
-        conn.execute("SELECT pg_advisory_xact_lock(%s)", (SCHEMA_LOCK_KEY,))
-        yield conn
+    with database_lock(database_id):
+        db = PersonalDatabase.objects.get(pk=database_id)
+        if db.status != "ready":
+            msg = "Database is not ready"
+            raise DatabaseNotReady(msg)
+        with privileged_connection(database_id) as conn, conn.transaction():
+            conn.execute("SET LOCAL lock_timeout = '5s'")
+            key = UUID(str(database_id)).int % (2**63 - 1)
+            conn.execute("SELECT pg_advisory_xact_lock(%s)", (key,))
+            conn.execute("SELECT pg_advisory_xact_lock(%s)", (SCHEMA_LOCK_KEY,))
+            yield conn
 
 
 def object_identifier(name):
@@ -52,24 +62,61 @@ def _role(actor_id, role_id):
     return role
 
 
-def create_role(actor_id, database_id, name):
+def _validate_description(description):
+    if not isinstance(description, str) or len(description) > MAX_ROLE_DESCRIPTION:
+        msg = "Role description must be text (maximum 2000 characters)"
+        raise ValueError(msg)
+
+
+def create_role(actor_id, database_id, name, description=""):
     db = require_owner(actor_id, database_id)
     if not isinstance(name, str) or not name.strip() or len(name) > MAX_ROLE_NAME:
         msg = "Role name required (maximum 100 characters)"
         raise ValueError(msg)
-    role, _ = AccessRole.objects.get_or_create(database=db, name=name.strip())
+    _validate_description(description)
     with sharing_lock(db.id) as conn:
+        role, _ = AccessRole.objects.get_or_create(
+            database=db, name=name.strip(), defaults={"description": description}
+        )
         if not conn.execute(
             "SELECT 1 FROM pg_roles WHERE rolname=%s", (role.pg_name,)
         ).fetchone():
             conn.execute(
                 sql.SQL("CREATE ROLE {} NOLOGIN").format(sql.Identifier(role.pg_name))
             )
+            conn.execute(
+                sql.SQL("COMMENT ON ROLE {} IS {}").format(
+                    sql.Identifier(role.pg_name), sql.Literal(f"opendb:{db.id}")
+                )
+            )
         conn.execute(
             sql.SQL("GRANT USAGE ON SCHEMA data, public TO {}").format(
                 sql.Identifier(role.pg_name)
             )
         )
+    return role
+
+
+def update_role(actor_id, database_id, role_id, *, name=_UNSET, description=_UNSET):
+    require_owner(actor_id, database_id)
+    role = _role(actor_id, role_id)
+    if str(role.database_id) != str(database_id):
+        msg = "Database unavailable"
+        raise DatabaseAccessDenied(msg)
+    fields = []
+    if name is not _UNSET:
+        if not isinstance(name, str) or not name.strip() or len(name) > MAX_ROLE_NAME:
+            msg = "Role name required (maximum 100 characters)"
+            raise ValueError(msg)
+        role.name = name.strip()
+        fields.append("name")
+    if description is not _UNSET:
+        _validate_description(description)
+        role.description = description
+        fields.append("description")
+    if fields:
+        role.full_clean()
+        role.save(update_fields=fields)
     return role
 
 
@@ -188,6 +235,11 @@ def guest_connection(actor_id, db):
                     sql.Literal(derive_database_password(db.id, identity)),
                 )
             )
+            conn.execute(
+                sql.SQL("COMMENT ON ROLE {} IS {}").format(
+                    sql.Identifier(guest), sql.Literal(f"opendb:{db.id}")
+                )
+            )
         for (membership,) in conn.execute(
             "SELECT r.rolname FROM pg_auth_members m JOIN pg_roles r ON "
             "r.oid=m.roleid JOIN pg_roles g ON g.oid=m.member WHERE g.rolname=%s",
@@ -236,6 +288,7 @@ def list_access(actor_id, database_id):
                 {
                     "id": str(role.pk),
                     "name": role.name,
+                    "description": role.description,
                     "objects": [row[0] for row in objects],
                     "emails": list(
                         role.roleassignment_set.values_list("email", flat=True)

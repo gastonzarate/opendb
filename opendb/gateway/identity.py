@@ -14,6 +14,9 @@ from django.core.validators import validate_email
 from django.db import IntegrityError
 from django.db import transaction
 
+from opendb.databases.models import PersonalDatabase
+from opendb.databases.provisioning import provision_personal_database
+
 MAX_GOOGLE_SUBJECT_LENGTH = 255
 MAX_EMAIL_LENGTH = 254
 
@@ -50,6 +53,21 @@ def _active_user(account):
 
 
 def resolve_google_user(claims):
+    """Resolve verified identity and provision only after its transaction commits."""
+    user = _resolve_google_user(claims)
+    if PersonalDatabase.objects.filter(
+        owner=user, status__in=["ready", "deleted", "deleting", "delete_failed"]
+    ).exists():
+        return user
+
+    def provision_after_login():
+        provision_personal_database(user.pk)
+
+    transaction.on_commit(provision_after_login, robust=True)
+    return user
+
+
+def _resolve_google_user(claims):
     """Find or atomically create a user by verified Google subject.
 
     Existing users keep their email; email changes require a separate explicit

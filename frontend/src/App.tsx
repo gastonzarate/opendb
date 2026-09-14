@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Database as DatabaseIcon,
   Table2,
@@ -7,7 +7,6 @@ import {
   Network,
   Plug,
   ArrowUpRight,
-  Plus,
   Search,
   LogOut,
   ShieldCheck,
@@ -17,6 +16,7 @@ import {
 } from "lucide-react";
 import { api, read, setCsrf, ApiError } from "./api";
 import type { Bootstrap, Catalog, Database, Session } from "./types";
+import { DeleteDatabase } from "./DeleteDatabase";
 import { Explorer } from "./Explorer";
 import { AccessPanel, VectorPanel, ConnectPanel } from "./AdminPanels";
 const Brand = () => (
@@ -172,22 +172,40 @@ function Workspace({ boot, session }: { boot: Bootstrap; session: Session }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
+  const started = useRef(false);
   async function load() {
     setLoading(true);
     setError("");
     try {
-      const dbs = await api<Database[]>("list_databases");
+      let dbs = await api<Database[]>("list_databases");
       setDatabases(dbs);
       setSelected((old) =>
-        dbs.some((d) => d.id === old) ? old : dbs[0]?.id || "",
+        dbs.some((d) => d.id === old)
+          ? old
+          : (dbs.find((d) => d.is_owner) || dbs[0])?.id || "",
+      );
+      if (!dbs.some((d) => d.is_owner)) {
+        setCreating(true);
+        await api<Database>("create_database");
+        dbs = await api<Database[]>("list_databases");
+        setSelected(dbs.find((d) => d.is_owner)?.id || "");
+      }
+      setDatabases(dbs);
+      setSelected((old) =>
+        dbs.some((d) => d.id === old)
+          ? old
+          : (dbs.find((d) => d.is_owner) || dbs[0])?.id || "",
       );
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setLoading(false);
+      setCreating(false);
     }
   }
   useEffect(() => {
+    if (started.current) return;
+    started.current = true;
     void load();
   }, []);
   async function create() {
@@ -236,18 +254,32 @@ function Workspace({ boot, session }: { boot: Bootstrap; session: Session }) {
       </header>
       {loading && !db ? (
         <div className="startup-error" role="status">
-          Cargando bases…
+          Preparando tu base personal…
         </div>
       ) : (
         <DatabaseWorkspace
-          key={db?.id || "empty"}
+          key={`${db?.id || "empty"}:${db?.status || ""}`}
           db={db}
+          onDeleted={(deleted) =>
+            setDatabases((current) =>
+              current.map((item) => (item.id === deleted.id ? deleted : item)),
+            )
+          }
           databases={databases}
           select={setSelected}
           create={create}
           creating={creating}
-          canCreate={!databases.some((d) => d.is_owner)}
+          missingOwn={!databases.some((item) => item.is_owner)}
           boot={boot}
+          onOnboardingComplete={() =>
+            setDatabases((current) =>
+              current.map((item) =>
+                item.id === db?.id
+                  ? { ...item, onboarding_completed: true }
+                  : item,
+              ),
+            )
+          }
           error={error}
         />
       )}
@@ -260,22 +292,47 @@ function DatabaseWorkspace({
   select,
   create,
   creating,
-  canCreate,
+  missingOwn,
   boot,
   error: outerError,
+  onOnboardingComplete,
+  onDeleted,
 }: {
   db?: Database;
   databases: Database[];
   select: (id: string) => void;
   create: () => void;
   creating: boolean;
-  canCreate: boolean;
+  missingOwn: boolean;
   boot: Bootstrap;
   error: string;
+  onOnboardingComplete: () => void;
+  onDeleted: (db: Database) => void;
 }) {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [objectName, setObjectName] = useState("");
-  const [section, setSection] = useState("explorer");
+  const [onboarding, setOnboarding] = useState(
+    Boolean(db?.is_owner && !db.onboarding_completed),
+  );
+  const [section, setSection] = useState(
+    db?.is_owner && !db.onboarding_completed ? "connect" : "explorer",
+  );
+  const [completing, setCompleting] = useState(false);
+  async function completeOnboarding() {
+    if (!db) return;
+    setCompleting(true);
+    setError("");
+    try {
+      await api("complete_onboarding", { database_id: db.id });
+      onOnboardingComplete();
+      setOnboarding(false);
+      setSection("explorer");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setCompleting(false);
+    }
+  }
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -323,10 +380,10 @@ function DatabaseWorkspace({
   const objects = catalog?.objects || [];
   const chosen = objects.find((o) => o.name === objectName) || null;
   const nav = [
-    { id: "explorer", label: "Explorador", icon: Table2 },
+    { id: "connect", label: "Conectar asistente", icon: Plug },
+    { id: "explorer", label: "Mis datos", icon: Table2 },
     { id: "access", label: "Accesos", icon: Users },
     { id: "vectors", label: "Indexación", icon: Network },
-    { id: "connect", label: "Conectar asistente", icon: Plug },
   ];
   return (
     <div className="workspace-body">
@@ -362,7 +419,11 @@ function DatabaseWorkspace({
             {db?.status === "ready"
               ? "Disponible"
               : db
-                ? "Pendiente de aprovisionar"
+                ? db.status === "deleted"
+                  ? "Eliminada"
+                  : db.status === "delete_failed"
+                    ? "Borrado pendiente"
+                    : "Pendiente de aprovisionar"
                 : "Lista para empezar"}
           </span>
         </div>
@@ -386,51 +447,69 @@ function DatabaseWorkspace({
               </button>
             ))}
         </nav>
-        <div className="objects-heading">
-          OBJETOS<span>{objects.length}</span>
-        </div>
-        <label className="sidebar-search">
-          <Search size={14} />
-          <input
-            aria-label="Buscar tablas y vistas"
-            placeholder="Buscar un objeto…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
+        {section === "explorer" && (
+          <>
+            <div className="objects-heading">
+              TABLAS Y VISTAS<span>{objects.length}</span>
+            </div>
+            <label className="sidebar-search">
+              <Search size={14} />
+              <input
+                aria-label="Buscar tablas y vistas"
+                placeholder="Buscar tabla o vista…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </label>
+            <div className="object-list">
+              {objects
+                .filter((o) =>
+                  o.name.toLowerCase().includes(query.toLowerCase()),
+                )
+                .map((o) => (
+                  <button
+                    key={o.name}
+                    className={
+                      section === "explorer" && o.name === objectName
+                        ? "object-active"
+                        : ""
+                    }
+                    onClick={() => {
+                      setObjectName(o.name);
+                      setSection("explorer");
+                      setMobile(false);
+                    }}
+                    aria-current={
+                      section === "explorer" && o.name === objectName
+                        ? "true"
+                        : undefined
+                    }
+                  >
+                    {o.kind === "view" ? (
+                      <Layers size={15} />
+                    ) : (
+                      <Table2 size={15} />
+                    )}
+                    <span>{o.name}</span>
+                  </button>
+                ))}
+              {!objects.length && (
+                <p className="sidebar-hint">
+                  Tus tablas y vistas
+                  <br />
+                  aparecerán acá.
+                </p>
+              )}
+            </div>
+          </>
+        )}
+        {db?.is_owner && db.status !== "deleted" && (
+          <DeleteDatabase
+            database={db}
+            onDeleted={onDeleted}
+            onUnavailable={() => onDeleted({ ...db, status: "delete_failed" })}
           />
-        </label>
-        <div className="object-list">
-          {objects
-            .filter((o) => o.name.toLowerCase().includes(query.toLowerCase()))
-            .map((o) => (
-              <button
-                key={o.name}
-                className={
-                  section === "explorer" && o.name === objectName
-                    ? "object-active"
-                    : ""
-                }
-                onClick={() => {
-                  setObjectName(o.name);
-                  setSection("explorer");
-                  setMobile(false);
-                }}
-              >
-                {o.kind === "view" ? (
-                  <Layers size={15} />
-                ) : (
-                  <Table2 size={15} />
-                )}
-                <span>{o.name}</span>
-              </button>
-            ))}
-          {!objects.length && (
-            <p className="sidebar-hint">
-              Tus tablas y vistas
-              <br />
-              aparecerán acá.
-            </p>
-          )}
-        </div>
+        )}
         <div className="sidebar-bottom">
           <ShieldCheck size={18} />
           <div>
@@ -454,16 +533,16 @@ function DatabaseWorkspace({
             <div className="eyebrow">TU ESPACIO DE CONTEXTO</div>
             <h1>
               {section === "explorer"
-                ? "Explorador de datos"
+                ? "Mis datos"
                 : section === "access"
                   ? "Compartí con control"
                   : section === "vectors"
                     ? "Contexto listo para buscar"
-                    : "Tu asistente, conectado"}
+                    : "Conectá tu asistente"}
             </h1>
             <p className="muted">
               {section === "explorer"
-                ? "Toda tu información, con estructura y relaciones."
+                ? "Revisá lo que tu asistente guardó. Elegí una tabla o vista para explorar sus datos."
                 : section === "access"
                   ? "Elegí quién puede consultar cada parte de tu base."
                   : section === "vectors"
@@ -471,7 +550,7 @@ function DatabaseWorkspace({
                     : "Usá tu información desde el cliente que prefieras."}
             </p>
           </div>
-          {db && (
+          {db?.status === "ready" && section === "explorer" && (
             <button className="btn" onClick={refresh} disabled={loading}>
               <RefreshCw size={15} />
               Actualizar catálogo
@@ -483,40 +562,75 @@ function DatabaseWorkspace({
             {error || outerError}
           </div>
         )}
-        {!db && section !== "connect" ? (
+        {db && missingOwn && (
+          <div className="panel">
+            <p>
+              Podés consultar las bases compartidas mientras preparamos tu base
+              personal.
+            </p>
+            <button className="btn" onClick={create} disabled={creating}>
+              {creating ? "Preparando tu base…" : "Reintentar preparación"}
+            </button>
+          </div>
+        )}
+        {!db ? (
           <section className="panel welcome">
-            <div className="large-mark">
-              <DatabaseIcon size={30} />
-            </div>
-            <span className="eyebrow">UN NUEVO PUNTO DE PARTIDA</span>
-            <h2>Hacé lugar a tu información.</h2>
+            <h2>Estamos preparando tu base personal</h2>
             <p className="muted">
-              Creá tu base privada y conectá tu asistente.
-              <br />
-              Las tablas se adaptan a lo que necesitás guardar.
+              Tu cuenta incluye una única base privada. Si hubo un problema al
+              prepararla, podés reintentar.
             </p>
             <button
               className="btn btn-primary"
               onClick={create}
               disabled={creating}
             >
-              <Plus size={16} />
-              {creating ? "Creando tu base…" : "Crear mi base de datos"}
+              {creating ? "Preparando tu base…" : "Reintentar preparación"}
             </button>
-            <div className="welcome-steps">
-              <span>
-                <b>01</b> Creá tu base
-              </span>
-              <span>
-                <b>02</b> Conectá tu asistente
-              </span>
-              <span>
-                <b>03</b> Empezá a guardar
-              </span>
-            </div>
+          </section>
+        ) : ["deleted", "deleting", "delete_failed"].includes(db.status) ? (
+          <section className="panel empty">
+            <h2>
+              {db.status === "deleted"
+                ? "Base eliminada"
+                : "El borrado todavía no terminó"}
+            </h2>
+            <p className="muted">
+              {db.status === "deleted"
+                ? "Tu cuenta sigue activa. Podés crear una base vacía cuando quieras."
+                : "Tus datos no están disponibles. Reintentá el borrado para completarlo."}
+            </p>
+            {db.is_owner && db.status === "deleted" && (
+              <button
+                className="btn btn-primary"
+                onClick={create}
+                disabled={creating}
+              >
+                {creating ? "Creando…" : "Crear base vacía"}
+              </button>
+            )}
           </section>
         ) : section === "connect" ? (
-          <ConnectPanel mcpUrl={boot.mcp_url} />
+          <>
+            {db.status !== "ready" && db.is_owner && (
+              <div className="panel">
+                <p role="status">
+                  Tu base todavía no está lista. Podés configurar el asistente y
+                  reintentar la preparación.
+                </p>
+                <button className="btn" onClick={create} disabled={creating}>
+                  Reintentar preparación
+                </button>
+              </div>
+            )}
+            <ConnectPanel
+              mcpUrl={boot.mcp_url}
+              databaseReady={db.status === "ready"}
+              onboarding={onboarding}
+              onComplete={() => void completeOnboarding()}
+              completing={completing}
+            />
+          </>
         ) : db?.status !== "ready" ? (
           <section className="panel empty">
             <h2>La base todavía no está lista</h2>
@@ -534,13 +648,15 @@ function DatabaseWorkspace({
                   Cargando catálogo…
                 </section>
               ) : (
-                <Explorer
-                  key={objectName}
-                  databaseId={db.id}
-                  object={chosen}
-                  isOwner={db.is_owner}
-                  onChanged={refresh}
-                />
+                <>
+                  <Explorer
+                    key={objectName}
+                    databaseId={db.id}
+                    object={chosen}
+                    isOwner={db.is_owner}
+                    onChanged={refresh}
+                  />
+                </>
               ))}
             {section === "access" && (
               <AccessPanel
@@ -557,16 +673,6 @@ function DatabaseWorkspace({
               />
             )}
           </>
-        )}
-        {db && canCreate && (
-          <button
-            className="btn create-own"
-            onClick={create}
-            disabled={creating}
-          >
-            <Plus size={15} />
-            Crear también mi base personal
-          </button>
         )}
         <footer className="workspace-footer">
           <span>

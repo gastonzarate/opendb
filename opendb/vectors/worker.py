@@ -12,6 +12,8 @@ import time
 from pathlib import Path
 from uuid import UUID
 
+from .discovery import configuration
+from .discovery import discover
 from .embeddings import MODEL_SHA256
 from .embeddings import EmbeddingError
 from .indexing import MAX_ROWS
@@ -39,7 +41,10 @@ def run_once(database_id=None, limit=10):
         summary = {"database_id": str(database.id)}
         try:
             with privileged_connection(database.id) as conn:
+                summary.update(discover(conn))
                 summary.update(process_pending(conn, limit=limit))
+                if summary["discovery_failed"] or summary["failed"]:
+                    exit_code = 1
         except Exception:  # noqa: BLE001 - isolate unavailable personal databases.
             summary["error_code"] = "database_processing_failed"
             exit_code = 1
@@ -70,6 +75,10 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if not 1 <= args.limit <= MAX_ROWS or args.poll_interval <= 0:
         parser.error("limit must be 1-1000 and poll-interval must be positive")
+    try:
+        configuration()
+    except ValueError as exc:
+        parser.error(str(exc))
     if args.model_file:
         verify_model(args.model_file)
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.production")

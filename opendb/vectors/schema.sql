@@ -275,3 +275,128 @@ GRANT EXECUTE ON FUNCTION opendb_catalog.vector_view_visible(uuid,oid) TO PUBLIC
 GRANT EXECUTE ON FUNCTION opendb_catalog.vector_search(uuid,text,text,integer,jsonb) TO PUBLIC;
 REVOKE ALL ON opendb_catalog.vector_indexes, opendb_catalog.vector_rows,
     opendb_catalog.vector_chunks, opendb_catalog.vector_version_seq FROM PUBLIC;
+
+-- Exact weighted RRF over all current filtered chunks; no embedding migration.
+CREATE OR REPLACE FUNCTION opendb_catalog.hybrid_search(
+    wanted uuid, query_input text, wanted_model text, result_limit integer,
+    query_text text, semantic_weight double precision DEFAULT 50,
+    filters jsonb DEFAULT '{}'::jsonb
+) RETURNS SETOF jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp AS $$
+DECLARE
+    query_vector public.vector;
+    cfg record;
+    field text;
+    conditions text := '';
+    statement text;
+BEGIN
+    IF semantic_weight IS NULL OR NOT (semantic_weight >= 0 AND semantic_weight <= 100) THEN
+        RAISE EXCEPTION 'Invalid semantic weight' USING ERRCODE='22023';
+    END IF;
+    IF query_text IS NULL OR query_text ~ '^[[:space:]]*$' THEN
+        RAISE EXCEPTION 'Query must be nonempty text' USING ERRCODE='22023';
+    END IF;
+    IF char_length(query_text)>16384 THEN
+        RAISE EXCEPTION 'Query must contain at most 16384 characters' USING ERRCODE='22023';
+    END IF;
+    IF NOT opendb_catalog.vector_visible(wanted) THEN
+        RAISE EXCEPTION 'Vector index unavailable' USING ERRCODE='42501';
+    END IF;
+    SELECT i.*,c.relname INTO cfg FROM opendb_catalog.vector_valid_sources i
+        JOIN pg_catalog.pg_class c ON c.oid=i.source_relid WHERE i.id=wanted;
+    -- Hold the real relation identity through validation/query. This prevents
+    -- a concurrent DROP/recreate from replacing the checked table by name.
+    EXECUTE format('LOCK TABLE data.%I IN ACCESS SHARE MODE',cfg.relname);
+    IF to_regclass(format('data.%I',cfg.relname)) IS DISTINCT FROM cfg.source_relid
+       OR NOT opendb_catalog.vector_visible(wanted) THEN
+        RAISE EXCEPTION 'Vector index unavailable' USING ERRCODE='42501';
+    END IF;
+    SELECT i.*,c.relname,k.attname AS key_name,t.attname AS text_name INTO cfg
+        FROM opendb_catalog.vector_valid_sources i
+        JOIN pg_catalog.pg_class c ON c.oid=i.source_relid
+        JOIN pg_catalog.pg_attribute k ON k.attrelid=c.oid AND k.attnum=i.key_attnum
+        JOIN pg_catalog.pg_attribute t ON t.attrelid=c.oid AND t.attnum=i.text_attnum
+        WHERE i.id=wanted;
+    IF result_limit IS NULL OR result_limit < 1 OR result_limit > 1000 THEN
+        RAISE EXCEPTION 'Limit must be between 1 and 1000' USING ERRCODE='22023';
+    END IF;
+    IF (semantic_weight > 0 OR wanted_model IS NOT NULL)
+       AND cfg.model_id IS DISTINCT FROM wanted_model THEN
+        RAISE EXCEPTION 'Embedding model mismatch' USING ERRCODE='22023';
+    END IF;
+    IF filters IS NULL OR jsonb_typeof(filters)<>'object' THEN
+        RAISE EXCEPTION 'Filters require an object' USING ERRCODE='22023';
+    END IF;
+    IF (SELECT count(*) FROM jsonb_object_keys(filters)) > 16 THEN
+        RAISE EXCEPTION 'At most 16 filters are supported' USING ERRCODE='22023';
+    END IF;
+    FOR field IN SELECT jsonb_object_keys(filters) LOOP
+        IF jsonb_typeof(filters->field) NOT IN ('string','number','boolean','null')
+           OR NOT EXISTS (
+               SELECT FROM pg_catalog.pg_attribute a WHERE a.attrelid=cfg.source_relid
+                 AND a.attname=field AND a.attnum>0 AND NOT a.attisdropped
+                 AND a.atttypid IN (16,17,20,21,23,25,114,700,701,1042,1043,
+                                   1082,1083,1114,1184,1186,1266,1700,2950,3802)
+           ) THEN
+            RAISE EXCEPTION 'Unsupported filter column or value' USING ERRCODE='22023';
+        END IF;
+        conditions := conditions || format(
+            ' AND coalesce(pg_catalog.to_jsonb(s.%I),''null''::jsonb)=($4->%L)',field,field);
+    END LOOP;
+    IF semantic_weight > 0 OR query_input IS NOT NULL THEN
+        query_vector := query_input::public.vector;
+        IF query_vector IS NULL OR public.vector_dims(query_vector) <> 384
+           OR public.vector_norm(query_vector) <= 0 THEN
+            RAISE EXCEPTION 'Expected a nonzero 384-dimensional vector' USING ERRCODE='22023';
+        END IF;
+    END IF;
+    statement := format($query$
+        WITH candidates AS MATERIALIZED (
+        SELECT c.*,
+            CASE WHEN $6 > 0 THEN 1-(c.embedding OPERATOR(public.<=>) $1) END AS semantic_score,
+            CASE WHEN $6 < 100 THEN ts_rank_cd(to_tsvector('pg_catalog.simple', c.text),
+                 websearch_to_tsquery('pg_catalog.simple', $5)) END AS lexical_score,
+            CASE WHEN $6 < 100 THEN to_tsvector('pg_catalog.simple', c.text) @@
+                 websearch_to_tsquery('pg_catalog.simple', $5) ELSE false END AS lexical_match
+        FROM opendb_catalog.vector_chunks c
+        JOIN opendb_catalog.vector_rows r USING (index_id,source_key,version)
+        JOIN data.%I s ON pg_catalog.to_jsonb(s.%I)=c.source_key
+                     AND s.%I::pg_catalog.text IS NOT DISTINCT FROM r.source_text
+        WHERE c.index_id=$2 AND r.state='ready' %s
+        ), ranked AS (
+            SELECT *,
+                CASE WHEN $6 > 0 THEN row_number() OVER (
+                    ORDER BY semantic_score DESC NULLS LAST,source_key,chunk_order) END AS semantic_rank,
+                CASE WHEN lexical_match THEN row_number() OVER (
+                    ORDER BY lexical_match DESC NULLS LAST,lexical_score DESC NULLS LAST,source_key,chunk_order) END AS lexical_rank
+            FROM candidates
+        ), scored AS (
+            SELECT *,61 * (coalesce(($6 / 100.0)/(60+semantic_rank),0) +
+                          coalesce((1-$6 / 100.0)/(60+lexical_rank),0)) AS score
+            FROM ranked WHERE $6 > 0 OR lexical_match
+        )
+        SELECT jsonb_build_object(
+            'index_id',index_id,'source_key',source_key,'version',version,
+            'chunk_order',chunk_order,'char_start',char_start,'char_end',char_end,
+            'token_start',token_start,'token_end',token_end,'text',text,
+            'score',score,'semantic_score',semantic_score,'lexical_score',lexical_score,
+            'semantic_rank',semantic_rank,'lexical_rank',lexical_rank)
+        FROM scored ORDER BY score DESC,source_key,chunk_order LIMIT $3
+    $query$,cfg.relname,cfg.key_name,cfg.text_name,conditions);
+    RETURN QUERY EXECUTE statement USING query_vector,wanted,result_limit,filters,query_text,semantic_weight;
+END $$;
+
+GRANT EXECUTE ON FUNCTION opendb_catalog.hybrid_search(uuid,text,text,integer,text,double precision,jsonb) TO PUBLIC;
+
+-- Reveal only the configured model of an index authorized through this view.
+CREATE OR REPLACE FUNCTION opendb_catalog.vector_view_model(wanted uuid, target oid)
+RETURNS text LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp AS $$
+BEGIN
+    IF NOT opendb_catalog.vector_view_visible(wanted,target) THEN
+        RAISE EXCEPTION 'Vector index or target view unavailable' USING ERRCODE='42501';
+    END IF;
+    RETURN (SELECT model_id FROM opendb_catalog.vector_valid_sources WHERE id=wanted);
+END $$;
+GRANT EXECUTE ON FUNCTION opendb_catalog.vector_view_model(uuid,oid) TO PUBLIC;

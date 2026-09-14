@@ -22,6 +22,78 @@ needed. The implementation uses the existing psycopg dependency and the Python
 standard library. Vector literals are bound parameters and cast inside PostgreSQL.
 Package `opendb/vectors/schema.sql` with the application, as with the peer catalog.
 
+## Automatic discovery
+
+Before each embedding batch the worker scans source column metadata in `data`.
+No assistant `register_vector` call is required. It registers a TEXT, VARCHAR or
+CHAR column when either deterministic rule holds:
+
+- Any row has at least `OPENDB_VECTOR_MIN_TEXT_CHARS` characters (default **500**).
+- Its name matches the curated narrative list, case-insensitively, and any row
+  contains non-whitespace text: `body`, `content`, `text`, `texto`, `contenido`,
+  `transcript`, `transcription`, `transcripcion`, `dialogue`, `utterance`.
+
+`OPENDB_VECTOR_NARRATIVE_COLUMNS` replaces that list with comma-separated names;
+an empty value disables the name rule. Invalid/nonpositive thresholds reject worker
+startup. These are column-registration rules: once qualified, **all existing rows**
+are queued, and triggers capture future inserts, edits, deletes and truncation,
+including short text. Each transcript turn remains its own relational row. Source
+text is preserved; the existing lossless chunker and embedding model are unchanged.
+Other meaningful short narrative columns can still be registered explicitly.
+
+`discovery.discover(conn)` uses an idle privileged connection and returns
+`registered`, `discovery_failed`, and `discovery_errors`. Repeated passes skip valid
+registrations by relation OID and text attribute number, regardless of the key used
+for explicit registration. No content values are returned by discovery SQL or logged.
+The worker adds these fields to its JSON summary and exits nonzero on discovery or
+embedding failures. Failures identify only table, column and a stable error code;
+raw database/provider exception messages are not exposed. They are retried on later
+passes. They do not undo successful relational ingestion. Before registration,
+failures are visible in worker summaries, not in `vector_status` index counts.
+
+Eligible plain tables reuse a supported, immediate, single-column unique NOT NULL
+key (primary key preferred). Otherwise the scanner adds a bigint
+`GENERATED ALWAYS AS IDENTITY UNIQUE` column named `_opendb_vector_id_<uuidhex>`.
+It populates existing rows without changing original columns or row structure.
+The surrogate and registration commit together; failure rolls both back. A later
+pass reuses the same key. Identifier quoting, OID/attribute validation and bounded
+UUID names avoid collisions and name-replacement races. No grants are broadened.
+
+Views and materialized views are skipped without evaluation: index their eligible
+base tables. RLS, inheritance, partitions, foreign tables, and sources with any
+expression or partial indexes are unsupported and reported without reading their
+rows. Expression/partial indexes are rejected by explicit registration too, because
+PostgreSQL planning can evaluate owner-defined immutable functions. The scanner
+revalidates eligibility under a table lock before any privileged row probe.
+
+Discovery and explicit registration acquire `SCHEMA_LOCK_KEY` before table locks.
+The scanner pins `search_path=pg_catalog`, uses a 1-second lock timeout and a
+30-second per-statement timeout, and retries failures. Qualification holds a
+SHARE UPDATE EXCLUSIVE lock: ordinary writes can continue, while concurrent index
+creation and unsafe DDL cannot change the preflight result. Qualifying columns then
+use registration's write lock to install capture and backfill without a write gap;
+surrogate creation needs an ACCESS EXCLUSIVE lock and may rewrite a large table.
+
+Qualification uses `EXISTS` and stops at the first matching row. Negative probes
+can scan a whole unregistered column each pass; `--limit` bounds embedding rows,
+not discovery work. Polling costs grow with unregistered columns and table size.
+A statement that repeatedly exceeds the timeout remains an explicit failure; it is
+not reported as indexed. Tune polling for deployment size and resolve failures.
+
+Ingestion reports `queued_for_discovery` before registration, with
+`automatic_discovery: pending`. Existing registered indexes may separately report
+pending/failed counts; ready older indexes never prove coverage of newly added
+columns. Results are commit-time snapshots and idempotent replay preserves them.
+Use `vector_status` for current registered-index readiness; empty status before
+discovery does not mean indexing completed. Missing vector infrastructure reports
+`unavailable`. Automatic indexing is implicit in saving text and needs no separate
+permission or optional user-facing offer.
+
+This change needs no catalog SQL migration: existing registrations and their grants
+are reused. Deploying the updated worker enables discovery/backfill for existing
+ready databases. Validation uses only the disposable cluster; live backfill remains
+an operational action owned by the main task.
+
 ## Model artifact and reproducible deployment
 
 The exact artifact was verified read-only on the Pi on 2026-09-13. The parent copied
@@ -117,7 +189,8 @@ Registration also accepts `data.notes`. A source must be an ordinary `data` tabl
 with a single-column immediate unique key (including a primary key), NOT NULL,
 and a `text`, `varchar`, or `char` text column. Supported keys are PostgreSQL
 smallint/integer/bigint, UUID, text/varchar/char. Composite, nullable, conditional,
-expression, deferred, custom-type and nonunique keys are rejected. Views,
+expression, deferred, custom-type and nonunique keys are rejected by explicit
+registration. Sources with any expression or partial index are also rejected. Views,
 materialized views, inheritance, partitions, and row-level-security tables are
 explicitly deferred. Enabling RLS after registration hides that index and its SQL
 view until RLS is disabled. Column/table renaming preserves OID/attribute identity. Search/status and worker
@@ -131,7 +204,7 @@ Optional retrieval parameters preserve the original call signature:
 
 ```python
 vectors.search(conn, index_id, query, limit=10,
-               target_view=None, filters={"label": "public"})
+               semantic_weight=50, target_view=None, filters={"label": "public"})
 ```
 
 `filters` is an object of at most 16 scalar equality conditions, combined with
@@ -146,10 +219,13 @@ requiring new embeddings.
 
 Search returns chunk hits with `index_id`, the JSON scalar `source_key`, source
 `version`, `chunk_order`, `char_start`, `char_end`, `token_start`, `token_end`, `text`,
-and cosine similarity `score` (higher is closer). It returns at most `limit`
-chunks, not deduplicated records. Limits are 1–1000, default 10. Empty queries and
-queries exceeding 512 tokens including special tokens are rejected. Empty/NULL
-source texts become ready with zero chunks.
+and hybrid `score` (higher ranks first), plus `semantic_score`, `lexical_score`,
+`semantic_rank` and `lexical_rank`. The raw semantic score is cosine similarity;
+the final score is weighted reciprocal-rank fusion, not a probability. It returns
+at most `limit` chunks, not deduplicated records. Limits are 1–1000, default 10.
+Empty queries and queries longer than 16,384 characters are rejected. Semantic
+queries cannot exceed 512 tokens including
+special tokens. Empty/NULL source texts become ready with zero chunks.
 
 Chunks do not overlap. Character offsets are Python Unicode code-point positions
 into the exact source text, zero-based and end-exclusive; order starts at zero.
@@ -270,9 +346,9 @@ The parent SQL policy must continue rejecting trigger disabling/dropping,
 SECURITY DEFINER/function creation, role switching, internal-schema writes, and
 session replication-role changes. Direct database administrators can bypass these
 invariants and are trusted. Dropped source tables disappear from search/status;
-their orphaned internal bookkeeping can be removed by an administrator. Changing
-registered key constraints or replacing source schemas requires administrative
-re-registration; it is not an automatic schema migration mechanism.
+their orphaned internal bookkeeping can be removed by an administrator. Changing registered key constraints or replacing source schemas invalidates the
+old registration. Discovery can register a newly eligible source, but does not
+clean orphaned bookkeeping or migrate existing sharing views.
 
 ## Validation
 
@@ -311,3 +387,42 @@ Shared configuration changes needed: none beyond the parent's existing psycopg
 binary dependency and pgvector PostgreSQL 17 service; set `OPENDB_EMBEDDING_URL`,
 deploy the pinned llama-server separately, and run the worker above. No shared
 Docker, settings, dependency, or fixture files were edited by this module's worker.
+
+
+## Hybrid retrieval and agent-selected weight
+
+MCP keeps the tool name `search_vectors` and accepts `semantic_weight`, a finite
+number in [0,100], default 50. Vector and semantic refer to the same channel;
+the other channel is lexical PostgreSQL full-text search. The agent sends the
+query and weight; the user need not configure ranking. `0` avoids all embedding
+inference and returns only lexical matches; `100` uses only the semantic ranking.
+
+Both channels rank the same authorized, filtered, current indexed chunks. The
+lexical channel uses `to_tsvector('pg_catalog.simple', text)`,
+`websearch_to_tsquery` and `ts_rank_cd`; this is token search, not BM25, substring
+matching, accent-insensitive matching or language-specific stemming. See the
+[PostgreSQL text search documentation](https://www.postgresql.org/docs/current/textsearch-controls.html).
+For shared views, lexical ranking uses projected text so redacted content cannot
+contribute hidden lexical matches.
+
+Let w=semantic_weight/100, r_s=semantic rank and r_l=lexical rank:
+
+`score = 61 * (w / (60+r_s) + (1-w) / (60+r_l))`
+
+An absent/inactive channel contributes zero. Ranking starts at 1 and ties have a
+deterministic source-key/chunk-order tiebreak. Weights affect rank contributions,
+not a fixed percentage of returned results. Scores are not calibrated relevance
+probabilities and should not be compared across independent queries/indexes.
+
+This MVP ranks all eligible chunks exactly, rather than re-ranking only a vector
+shortlist that could miss strong lexical hits. It therefore does not use the HNSW
+index to bound hybrid candidates; cost grows with the filtered corpus. A local
+statement timeout of at most 10 seconds bounds execution, preserving stricter
+caller timeouts. Lexical-only mode still searches **ready
+indexed chunks**; it is not a fallback over unindexed source rows. Use SQL for
+exact identifiers, totals or exhaustive source queries.
+
+Existing databases need the idempotent `vectors.install(admin_conn, owner_role)`
+upgrade. It adds the hybrid entrypoint without changing original text or
+recomputing embeddings. The old SQL `vector_search` entrypoint remains available
+for compatibility; the Python API and MCP route use hybrid search.

@@ -2,6 +2,7 @@ export interface Database {
   id: string;
   status: string;
   is_owner: boolean;
+  onboarding_completed?: boolean;
 }
 export interface Column {
   name: string;

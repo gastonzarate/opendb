@@ -63,20 +63,35 @@ def dispatch(actor_id: int, action: str, payload: dict):
     return _json_safe(result)
 
 
+def _database_result(db, user):
+    result = {"id": str(db.id), "status": db.status, "is_owner": db.owner_id == user.pk}
+    if result["is_owner"]:
+        result["onboarding_completed"] = db.onboarding_completed
+    return result
+
+
 def _dispatch(user, action, p):
     if action == "list_databases":
         dbs = PersonalDatabase.objects.filter(
             Q(owner=user) | Q(accessrole__roleassignment__email__iexact=user.email)
         ).distinct()
-        return [
-            {"id": str(db.id), "status": db.status, "is_owner": db.owner_id == user.pk}
-            for db in dbs
-        ]
+        return [_database_result(db, user) for db in dbs]
     if action == "create_database":
-        db = provision_personal_database(user.pk)
-        return {"id": str(db.id), "status": db.status}
+        db = provision_personal_database(user.pk, recreate_deleted=True)
+        return _database_result(db, user)
+    if action == "delete_database":
+        from .deletion import delete_personal_database
+
+        db = delete_personal_database(user.pk, p["database_id"])
+        return _database_result(db, user)
+    if action == "complete_onboarding":
+        db = require_owner(user.pk, p["database_id"])
+        db.onboarding_completed = True
+        db.save(update_fields=["onboarding_completed"])
+        return _database_result(db, user)
     if action in {
         "create_role",
+        "update_role",
         "grant_object",
         "assign_role",
         "revoke_role",
@@ -84,8 +99,26 @@ def _dispatch(user, action, p):
         "list_access",
     }:
         if action == "create_role":
-            role = sharing.create_role(user.pk, p["database_id"], p["name"])
-            return {"id": str(role.pk), "name": role.name}
+            role = sharing.create_role(
+                user.pk, p["database_id"], p["name"], p.get("description", "")
+            )
+            return {
+                "id": str(role.pk),
+                "name": role.name,
+                "description": role.description,
+            }
+        if action == "update_role":
+            role = sharing.update_role(
+                user.pk,
+                p["database_id"],
+                p["role_id"],
+                **{key: p[key] for key in ("name", "description") if key in p},
+            )
+            return {
+                "id": str(role.pk),
+                "name": role.name,
+                "description": role.description,
+            }
         if action == "list_access":
             return sharing.list_access(user.pk, p["database_id"])
         if action in {"grant_object", "revoke_object"}:
@@ -124,6 +157,7 @@ def _dispatch(user, action, p):
                 limit=p.get("limit", 10),
                 target_view=p.get("target_view"),
                 filters=p.get("filters"),
+                semantic_weight=p.get("semantic_weight", 50),
             )
         if action == "query":
             db = PersonalDatabase.objects.get(pk=database_id)

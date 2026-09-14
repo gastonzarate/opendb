@@ -5,11 +5,12 @@ from uuid import uuid4
 from psycopg import sql
 
 from .embeddings import MODEL_ID
+from .schema import SCHEMA_LOCK_KEY
 
 
 def _source(conn, table, key_column, text_column):
     name = table.removeprefix("data.")
-    if not name or "." in name:
+    if not name:
         msg = "Only tables in the data schema can be registered"
         raise ValueError(msg)
     row = conn.execute(
@@ -22,6 +23,10 @@ def _source(conn, table, key_column, text_column):
         WHERE n.nspname='data' AND c.relname=%s AND c.relkind='r'
           AND NOT c.relrowsecurity AND NOT c.relispartition AND NOT c.relhassubclass
           AND NOT EXISTS (SELECT FROM pg_catalog.pg_inherits WHERE inhrelid=c.oid)
+          AND NOT EXISTS (
+              SELECT FROM pg_catalog.pg_index unsafe WHERE unsafe.indrelid=c.oid
+                AND (unsafe.indexprs IS NOT NULL OR unsafe.indpred IS NOT NULL)
+          )
           AND NOT k.attisdropped AND NOT t.attisdropped AND k.attnotnull
           AND k.atttypid IN (20,21,23,25,1042,1043,2950)
           AND t.atttypid IN (25,1042,1043)
@@ -37,7 +42,8 @@ def _source(conn, table, key_column, text_column):
     if not row:
         msg = (
             "Source requires a plain data table, a unique non-null scalar key, "
-            "and a text column; views, inheritance and RLS are unsupported"
+            "and a text column; views, inheritance, RLS, expression and partial "
+            "indexes are unsupported"
         )
         raise ValueError(msg)
     return name, row
@@ -46,6 +52,7 @@ def _source(conn, table, key_column, text_column):
 def register(conn, table, key_column, text_column):
     """Install transactional change capture and backfill; never call the model."""
     with conn.transaction():
+        conn.execute("SELECT pg_catalog.pg_advisory_xact_lock(%s)", (SCHEMA_LOCK_KEY,))
         name, (relid, owner_oid, key_attnum, text_attnum) = _source(
             conn,
             table,
