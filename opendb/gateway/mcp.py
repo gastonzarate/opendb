@@ -130,6 +130,7 @@ def create_mcp(*, auth_provider=None, actor_dependency=None, dispatcher=None):
         "list_databases",
         "catalog",
         "list_access",
+        "saving_instructions",
         "search_vectors",
         "vector_status",
         "ingestion_history",

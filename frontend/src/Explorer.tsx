@@ -11,6 +11,7 @@ import {
   KeyRound,
 } from "lucide-react";
 import { api, browseSql, cell, quote } from "./api";
+import { monkeyMask } from "./assets";
 import type { DataObject, QueryResult } from "./types";
 export function ResultTable({ result }: { result: QueryResult }) {
   if (!result.columns)
@@ -299,7 +300,11 @@ export function Explorer({
           ) : (
             !error && (
               <div className="empty">
-                <Code2 size={30} />
+                <span
+                  className="monkey monkey-illus"
+                  style={monkeyMask("macaco-4.png")}
+                  aria-hidden="true"
+                />
                 <h3>
                   {object ? "Ejecutá una consulta" : "Tu esquema empieza acá"}
                 </h3>

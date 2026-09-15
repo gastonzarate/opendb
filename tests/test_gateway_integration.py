@@ -92,6 +92,7 @@ def test_real_dispatch_is_shared_by_session_api_and_sdk(personal_db, settings): 
                         "status": "ready",
                         "is_owner": True,
                         "onboarding_completed": False,
+                        "saving_instructions": "",
                     }
                 ]
             }
@@ -165,6 +166,29 @@ def test_real_dispatch_is_shared_by_session_api_and_sdk(personal_db, settings): 
     )
     assert completed.status_code == 200
     assert completed.json()["result"]["onboarding_completed"] is True
+    rules = web.post(
+        "/api/actions/update_saving_instructions/",
+        {
+            "database_id": str(personal_db.id),
+            "instructions": "Guardá cada reunión con sus participantes.",
+        },
+        content_type="application/json",
+        HTTP_X_CSRFTOKEN=csrf,
+    )
+    assert rules.status_code == 200
+    assert rules.json()["result"]["instructions"] == (
+        "Guardá cada reunión con sus participantes."
+    )
+    stored = web.post(
+        "/api/actions/saving_instructions/",
+        {"database_id": str(personal_db.id)},
+        content_type="application/json",
+        HTTP_X_CSRFTOKEN=csrf,
+    )
+    assert stored.status_code == 200
+    assert stored.json()["result"]["instructions"] == (
+        "Guardá cada reunión con sus participantes."
+    )
 
 
 def test_sdk_service_rejects_a_different_owner(personal_db):

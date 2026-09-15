@@ -110,6 +110,61 @@ describe("ConnectPanel onboarding and setup", () => {
     expect(screen.getByRole("tabpanel")).toHaveTextContent("OAuth");
   });
 
+  it("guides Kiro with a config file, an import command and no invented deep link", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    render(<ConnectPanel mcpUrl="https://datos.example/mcp/" />);
+    fireEvent.click(screen.getByRole("tab", { name: "Kiro" }));
+    const panel = screen.getByRole("tabpanel");
+    expect(panel).toHaveTextContent("~/.kiro/settings/mcp.json");
+    expect(panel).toHaveTextContent("/mcp");
+    expect(screen.getByLabelText("Configuración MCP de Kiro")).toHaveValue(
+      JSON.stringify(
+        {
+          mcpServers: {
+            opendb: { url: "https://datos.example/mcp/", timeout: 120000 },
+          },
+        },
+        null,
+        2,
+      ),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Copiar comando de Kiro" }),
+    );
+    await screen.findByRole("status");
+    expect(writeText).toHaveBeenLastCalledWith(
+      "kiro-cli mcp import --file opendb-mcp.json global",
+    );
+  });
+
+  it("explains Claude Desktop connectors and links to the real settings page", () => {
+    render(<ConnectPanel mcpUrl="https://datos.example/mcp/" />);
+    fireEvent.click(screen.getByRole("tab", { name: "Claude Desktop" }));
+    const panel = screen.getByRole("tabpanel");
+    expect(panel).toHaveTextContent("conector personalizado");
+    expect(panel).toHaveTextContent("infraestructura de Anthropic");
+    expect(
+      screen.getByRole("link", { name: "Abrir conectores de Claude" }),
+    ).toHaveAttribute("href", "https://claude.ai/customize/connectors");
+  });
+
+  it("offers a Cursor install link built from the endpoint", () => {
+    render(<ConnectPanel mcpUrl="https://datos.example/mcp/" />);
+    fireEvent.click(screen.getByRole("tab", { name: "MCP genérico" }));
+    const link = screen.getByRole("link", {
+      name: "Instalar OpenDB en Cursor",
+    });
+    const href = link.getAttribute("href") || "";
+    expect(href).toMatch(
+      /^cursor:\/\/anysphere\.cursor-deeplink\/mcp\/install\?name=opendb&config=/,
+    );
+    const config = decodeURIComponent(href.split("config=")[1]);
+    expect(JSON.parse(atob(config))).toEqual({
+      url: "https://datos.example/mcp/",
+    });
+  });
+
   it("keeps the read-only trial separate from optional ingestion", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal("navigator", { clipboard: { writeText } });

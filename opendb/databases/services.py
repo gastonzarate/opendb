@@ -10,6 +10,7 @@ import psycopg
 from django.contrib.auth import get_user_model
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db.models import Q
+from django.utils import timezone
 from pglast.parser import parse_sql_json
 from psycopg.rows import dict_row
 
@@ -24,6 +25,7 @@ from .sql_policy import validate_sql
 
 MAX_ROWS = 500
 MAX_RESULT_BYTES = 4 * 1024 * 1024
+SAVING_INSTRUCTIONS_MAX_LENGTH = 4000
 
 
 class SQLJSONEncoder(DjangoJSONEncoder):
@@ -67,7 +69,32 @@ def _database_result(db, user):
     result = {"id": str(db.id), "status": db.status, "is_owner": db.owner_id == user.pk}
     if result["is_owner"]:
         result["onboarding_completed"] = db.onboarding_completed
+        result["saving_instructions"] = db.saving_instructions
     return result
+
+
+def _saving_instructions_result(db):
+    return {
+        "database_id": str(db.id),
+        "instructions": db.saving_instructions,
+        "max_length": SAVING_INSTRUCTIONS_MAX_LENGTH,
+        "updated_at": db.saving_instructions_updated_at,
+    }
+
+
+def _clean_saving_instructions(value):
+    if value is None:
+        value = ""
+    if not isinstance(value, str):
+        msg = "instructions must be text."
+        raise ValueError(msg)  # noqa: TRY004 -- Public JSON validation contract.
+    value = value.replace("\r\n", "\n").strip()
+    if len(value) > SAVING_INSTRUCTIONS_MAX_LENGTH:
+        msg = (
+            f"instructions must be at most {SAVING_INSTRUCTIONS_MAX_LENGTH} characters."
+        )
+        raise ValueError(msg)
+    return value
 
 
 def _dispatch(user, action, p):
@@ -89,6 +116,14 @@ def _dispatch(user, action, p):
         db.onboarding_completed = True
         db.save(update_fields=["onboarding_completed"])
         return _database_result(db, user)
+    if action == "saving_instructions":
+        return _saving_instructions_result(require_owner(user.pk, p["database_id"]))
+    if action == "update_saving_instructions":
+        db = require_owner(user.pk, p["database_id"])
+        db.saving_instructions = _clean_saving_instructions(p.get("instructions"))
+        db.saving_instructions_updated_at = timezone.now()
+        db.save(update_fields=["saving_instructions", "saving_instructions_updated_at"])
+        return _saving_instructions_result(db)
     if action in {
         "create_role",
         "update_role",

@@ -13,6 +13,14 @@ class PersonalDatabase(models.Model):
     status = models.CharField(max_length=16, default="pending")
     error_code = models.CharField(max_length=64, blank=True)
     onboarding_completed = models.BooleanField(default=False)
+    # Owner-authored preferences about when and how the assistant should save.
+    # They refine assistant behaviour; they never widen database permissions.
+    saving_instructions = models.TextField(
+        blank=True, default="", validators=[MaxLengthValidator(4000)]
+    )
+    saving_instructions_updated_at = models.DateTimeField(
+        null=True, blank=True, editable=False
+    )
 
     def __str__(self):
         return self.database_name

@@ -4,6 +4,7 @@ WORKDIR /build/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY frontend/tsconfig.json frontend/vite.config.ts ./
+COPY frontend/public ./public
 COPY frontend/src ./src
 RUN npm run build
 

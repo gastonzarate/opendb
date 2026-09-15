@@ -10,20 +10,28 @@
   gap: 8px;
   text-align: left;
   padding: 16px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: white;
-  color: inherit;
+  border: 1px solid var(--border-quiet);
+  border-radius: 14px;
+  background: var(--glass-card);
+  color: var(--text-secondary);
   overflow-wrap: anywhere;
   cursor: pointer;
+  transition:
+    border-color var(--dur-hover) var(--ease-hover),
+    background var(--dur-hover) var(--ease-hover);
+}
+.access-panel .access-role-card:hover:not(:disabled) {
+  border-color: var(--border);
+  background: rgba(255, 255, 255, 0.06);
 }
 .access-panel .access-role-card[aria-pressed="true"] {
-  border-color: var(--green);
-  box-shadow: inset 3px 0 var(--green);
-  background: #f0faf4;
+  border-color: var(--accent-line);
+  box-shadow: inset 3px 0 var(--accent-bright);
+  background: var(--accent-soft);
+  color: var(--text-primary);
 }
 .access-panel .access-role-card:focus-visible {
-  outline: 2px solid var(--green);
+  outline: 2px solid var(--accent-bright);
   outline-offset: 3px;
 }
 .access-panel .access-role-card:disabled {
@@ -33,7 +41,7 @@
   white-space: pre-wrap;
 }
 .access-panel .access-role-card small {
-  color: var(--muted);
+  color: var(--text-muted);
 }
 .access-panel textarea {
   width: 100%;

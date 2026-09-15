@@ -6,6 +6,7 @@ import {
   Users,
   Network,
   Plug,
+  Settings,
   ArrowUpRight,
   Search,
   LogOut,
@@ -15,10 +16,34 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { api, read, setCsrf, ApiError } from "./api";
+import { asset, monkeyMask } from "./assets";
 import type { Bootstrap, Catalog, Database, Session } from "./types";
 import { DeleteDatabase } from "./DeleteDatabase";
 import { Explorer } from "./Explorer";
 import { AccessPanel, VectorPanel, ConnectPanel } from "./AdminPanels";
+import { SettingsPanel } from "./SettingsPanel";
+const headings: Record<string, { title: string; lead: string }> = {
+  connect: {
+    title: "Conectá tu asistente",
+    lead: "Usá tu información desde el cliente que prefieras.",
+  },
+  explorer: {
+    title: "Mis datos",
+    lead: "Revisá lo que tu asistente guardó. Elegí una tabla o vista para explorar sus datos.",
+  },
+  access: {
+    title: "Compartí con control",
+    lead: "Elegí quién puede consultar cada parte de tu base.",
+  },
+  vectors: {
+    title: "Contexto listo para buscar",
+    lead: "Seguí el estado de la búsqueda semántica.",
+  },
+  settings: {
+    title: "Configuración",
+    lead: "Definí cuándo y cómo tu asistente guarda información en tu base.",
+  },
+};
 const Brand = () => (
   <span className="brand">
     <span className="brand-mark">
@@ -31,6 +56,13 @@ const Brand = () => (
 function Login({ boot }: { boot: Bootstrap }) {
   return (
     <div className="login">
+      <div
+        className="login-jungle"
+        aria-hidden="true"
+        style={{
+          backgroundImage: `url("${asset("wall-alt-chimp-down.jpg")}")`,
+        }}
+      />
       <div className="login-nav">
         <Brand />
         <span className="muted">Tu contexto. Bajo tu control.</span>
@@ -66,6 +98,11 @@ function Login({ boot }: { boot: Bootstrap }) {
           </div>
         </div>
         <section className="login-card">
+          <span
+            className="monkey login-monkey"
+            style={monkeyMask("macaco-6.png")}
+            aria-hidden="true"
+          />
           <span className="large-mark">
             <DatabaseIcon size={30} />
           </span>
@@ -384,6 +421,7 @@ function DatabaseWorkspace({
     { id: "explorer", label: "Mis datos", icon: Table2 },
     { id: "access", label: "Accesos", icon: Users },
     { id: "vectors", label: "Indexación", icon: Network },
+    { id: "settings", label: "Configuración", icon: Settings },
   ];
   return (
     <div className="workspace-body">
@@ -500,6 +538,11 @@ function DatabaseWorkspace({
                 ))}
               {!objects.length && (
                 <p className="sidebar-hint">
+                  <span
+                    className="monkey monkey-badge"
+                    style={monkeyMask("macaco-4.png")}
+                    aria-hidden="true"
+                  />
                   Tus tablas y vistas
                   <br />
                   aparecerán acá.
@@ -536,23 +579,9 @@ function DatabaseWorkspace({
         <div className="page-heading">
           <div>
             <div className="eyebrow">TU ESPACIO DE CONTEXTO</div>
-            <h1>
-              {section === "explorer"
-                ? "Mis datos"
-                : section === "access"
-                  ? "Compartí con control"
-                  : section === "vectors"
-                    ? "Contexto listo para buscar"
-                    : "Conectá tu asistente"}
-            </h1>
+            <h1>{headings[section]?.title || headings.connect.title}</h1>
             <p className="muted">
-              {section === "explorer"
-                ? "Revisá lo que tu asistente guardó. Elegí una tabla o vista para explorar sus datos."
-                : section === "access"
-                  ? "Elegí quién puede consultar cada parte de tu base."
-                  : section === "vectors"
-                    ? "Seguí el estado de la búsqueda semántica."
-                    : "Usá tu información desde el cliente que prefieras."}
+              {headings[section]?.lead || headings.connect.lead}
             </p>
           </div>
           {db?.status === "ready" && section === "explorer" && (
@@ -580,6 +609,12 @@ function DatabaseWorkspace({
         )}
         {!db ? (
           <section className="panel welcome">
+            <img
+              className="welcome-monkey"
+              src={asset("chimp-shades.png")}
+              alt=""
+              aria-hidden="true"
+            />
             <h2>Estamos preparando tu base personal</h2>
             <p className="muted">
               Tu cuenta incluye una única base privada. Si hubo un problema al
@@ -595,6 +630,11 @@ function DatabaseWorkspace({
           </section>
         ) : ["deleted", "deleting", "delete_failed"].includes(db.status) ? (
           <section className="panel empty">
+            <span
+              className="monkey monkey-illus"
+              style={monkeyMask("macaco-5.png")}
+              aria-hidden="true"
+            />
             <h2>
               {db.status === "deleted"
                 ? "Base eliminada"
@@ -636,8 +676,15 @@ function DatabaseWorkspace({
               completing={completing}
             />
           </>
+        ) : section === "settings" ? (
+          <SettingsPanel databaseId={db.id} isOwner={db.is_owner} />
         ) : db?.status !== "ready" ? (
           <section className="panel empty">
+            <span
+              className="monkey monkey-illus"
+              style={monkeyMask("macaco-3.png")}
+              aria-hidden="true"
+            />
             <h2>La base todavía no está lista</h2>
             {db?.is_owner && (
               <button className="btn" onClick={create} disabled={creating}>

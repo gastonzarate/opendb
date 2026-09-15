@@ -9,7 +9,10 @@ def anyio_backend():
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("action", ["delete_database", "complete_onboarding"])
+@pytest.mark.parametrize(
+    "action",
+    ["delete_database", "complete_onboarding", "update_saving_instructions"],
+)
 async def test_web_only_actions_cannot_be_called_as_mcp_tools(action):
     from opendb.gateway.contract import ACTIONS
     from opendb.gateway.contract import WEB_ONLY_ACTIONS

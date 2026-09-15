@@ -3,6 +3,13 @@ export interface Database {
   status: string;
   is_owner: boolean;
   onboarding_completed?: boolean;
+  saving_instructions?: string;
+}
+export interface SavingInstructions {
+  database_id: string;
+  instructions: string;
+  max_length: number;
+  updated_at: string | null;
 }
 export interface Column {
   name: string;

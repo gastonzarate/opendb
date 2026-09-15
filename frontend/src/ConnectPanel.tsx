@@ -8,10 +8,29 @@ type ConnectPanelProps = {
   completing?: boolean;
 };
 
-const clients = ["Claude Code", "Codex", "MCP genérico"] as const;
+const clients = [
+  "Claude Code",
+  "Claude Desktop",
+  "Kiro",
+  "Codex",
+  "MCP genérico",
+] as const;
 type Client = (typeof clients)[number];
 // POSIX shell quoting: preserve the supplied endpoint as exactly one argument.
 const shellQuote = (value: string) => `'${value.replace(/'/g, `'"'"'`)}'`;
+// Página de conectores de Claude (web, Desktop y móvil comparten la misma configuración).
+const claudeConnectors = "https://claude.ai/customize/connectors";
+const kiroConfig = (url: string) =>
+  JSON.stringify({ mcpServers: { opendb: { url, timeout: 120000 } } }, null, 2);
+// Deeplink documentado de Cursor: el config va en base64 dentro de la URL.
+function cursorDeeplink(url: string) {
+  try {
+    const config = btoa(JSON.stringify({ url }));
+    return `cursor://anysphere.cursor-deeplink/mcp/install?name=opendb&config=${encodeURIComponent(config)}`;
+  } catch {
+    return "";
+  }
+}
 
 const isLoopback = (host: string) =>
   host === "localhost" || host === "[::1]" || /^127\./.test(host);
@@ -195,21 +214,141 @@ function ConnectionInstructions({
             </p>
           </>
         )}
+        {client === "Claude Desktop" && (
+          <>
+            <p>
+              Claude Desktop (igual que claude.ai y las apps móviles) usa
+              conectores personalizados: se configuran una vez en tu cuenta y
+              quedan disponibles en todos los clientes de Claude.
+            </p>
+            <ol>
+              <li>
+                <strong>Abre los conectores.</strong> En Claude Desktop entra a
+                Configuración → Conectores, o usá el botón de abajo para abrir
+                la misma página en el navegador.
+              </li>
+              <li>
+                <strong>Agrega un conector personalizado.</strong> Toca “+” →
+                “Agregar conector personalizado” y pegá la URL del servidor MCP
+                de arriba. En planes Team y Enterprise esto lo hace un Owner
+                desde Configuración de la organización → Conectores.
+              </li>
+              <li>
+                <strong>Conectá tu cuenta.</strong> Presioná “Conectar” y
+                completá la autorización de OpenDB con la misma cuenta de Google
+                que usás acá. Después habilitá el conector en el chat con el
+                botón “+”.
+              </li>
+            </ol>
+            <div className="form-row">
+              <a
+                className="btn btn-primary"
+                href={claudeConnectors}
+                target="_blank"
+                rel="noreferrer noopener"
+              >
+                Abrir conectores de Claude
+              </a>
+              {mcpUrl && (
+                <span className="small muted">
+                  Claude no ofrece un enlace de instalación automática: el botón
+                  abre la página y vos pegás la URL copiada.
+                </span>
+              )}
+            </div>
+            <p className="small muted">
+              Claude se conecta a OpenDB desde la infraestructura de Anthropic,
+              no desde tu computadora: la URL tiene que ser accesible por
+              internet. Un servidor en localhost o detrás de VPN no funciona,
+              incluso con Claude Desktop abierto.{" "}
+              <a href="https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp">
+                Guía oficial de conectores personalizados
+              </a>
+              .
+            </p>
+          </>
+        )}
+        {client === "Kiro" && (
+          <>
+            <p>
+              1. Agregá OpenDB a Kiro. Pegá esta configuración en{" "}
+              <code>~/.kiro/settings/mcp.json</code> (global) o en{" "}
+              <code>.kiro/settings/mcp.json</code> dentro del proyecto. Sirve
+              igual para Kiro IDE y para Kiro CLI.
+            </p>
+            {mcpUrl && (
+              <CopyBlock
+                label="Configuración MCP de Kiro"
+                button="Copiar configuración de Kiro"
+                value={kiroConfig(mcpUrl)}
+                rows={8}
+              />
+            )}
+            <p>
+              2. Si preferís la terminal, guardá ese JSON en un archivo e
+              importalo:
+            </p>
+            {mcpUrl && (
+              <CopyBlock
+                label="Comando de Kiro CLI"
+                button="Copiar comando de Kiro"
+                value={`kiro-cli mcp import --file opendb-mcp.json global`}
+              />
+            )}
+            <p>
+              3. Iniciá sesión. Abrí Kiro, escribí <code>/mcp</code> para ver el
+              estado de <code>opendb</code> y completá la autorización OAuth en
+              el navegador con tu cuenta de Google.
+            </p>
+            <p className="small muted">
+              Kiro no tiene un enlace de instalación de un clic: la
+              configuración se agrega por archivo o con{" "}
+              <code>kiro-cli mcp import</code>.
+            </p>
+          </>
+        )}
         {client === "MCP genérico" && (
-          <ol>
-            <li>
-              Abre las conexiones o herramientas de tu asistente y añade un
-              servidor MCP con la URL de arriba.
-            </li>
-            <li>
-              Elige HTTP transmisible (Streamable HTTP) y OAuth. El cliente debe
-              admitir ambos.
-            </li>
-            <li>
-              Completa la autorización de OpenDB en el navegador con tu cuenta
-              de Google y vuelve al asistente para probar el acceso.
-            </li>
-          </ol>
+          <>
+            <ol>
+              <li>
+                Abre las conexiones o herramientas de tu asistente y añade un
+                servidor MCP con la URL de arriba.
+              </li>
+              <li>
+                Elige HTTP transmisible (Streamable HTTP) y OAuth. El cliente
+                debe admitir ambos.
+              </li>
+              <li>
+                Completa la autorización de OpenDB en el navegador con tu cuenta
+                de Google y vuelve al asistente para probar el acceso.
+              </li>
+            </ol>
+            {mcpUrl && (
+              <>
+                <h3>Instalar con un clic</h3>
+                <p>
+                  Algunos editores aceptan enlaces de instalación. Si tenés
+                  Cursor instalado, este botón abre el diálogo con OpenDB ya
+                  cargado.
+                </p>
+                <div className="form-row">
+                  <a
+                    className="btn"
+                    href={cursorDeeplink(mcpUrl)}
+                    aria-label="Instalar OpenDB en Cursor"
+                  >
+                    Instalar en Cursor
+                  </a>
+                </div>
+                <p>Para VS Code, ejecutá este comando:</p>
+                <CopyBlock
+                  label="Comando de VS Code"
+                  button="Copiar comando de VS Code"
+                  value={`code --add-mcp '{"name":"opendb","type":"http","url":"${mcpUrl}"}'`}
+                />
+              </>
+            )}
+          </>
         )}
       </div>
       <section className="stack" aria-label="Prueba de lectura">
@@ -262,11 +401,13 @@ function CopyBlock({
   button,
   value,
   url = false,
+  rows = 3,
 }: {
   label: string;
   button: string;
   value: string;
   url?: boolean;
+  rows?: number;
 }) {
   const [state, setState] = useState<"idle" | "pending" | "copied" | "error">(
     "idle",
@@ -309,7 +450,7 @@ function CopyBlock({
             <textarea
               className="connect-code"
               readOnly
-              rows={3}
+              rows={rows}
               value={value}
               onFocus={(event) => event.currentTarget.select()}
             />

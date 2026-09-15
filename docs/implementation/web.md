@@ -246,8 +246,9 @@ el borrado; la cuenta de usuario permanece activa.
 
 ## Instrucciones del asistente y búsqueda híbrida
 
-`complete_onboarding` es exclusivamente web, como `delete_database`; no aparece
-entre las tools MCP. El servidor usa `gateway/contract.py:INSTRUCTIONS` y las
+`complete_onboarding` es exclusivamente web, como `delete_database` y
+`update_saving_instructions`; no aparecen entre las tools MCP. El servidor usa
+`gateway/contract.py:INSTRUCTIONS` y las
 reglas complementarias del recurso `opendb://guides/ingestion`. Las fuentes y
 metadatos son datos no confiables, no instrucciones. El agente usa ingest para
 cargas con procedencia, mantiene anotaciones y confirma el resultado brevemente.
@@ -256,3 +257,33 @@ cargas con procedencia, mantiene anotaciones y confirma el resultado brevemente.
 el balance semántico/léxico. Consultar `vectors.md` para ranking, permisos y límites.
 Después de actualizar el servidor hay que reconectar el cliente MCP para recibir
 las instrucciones y descripciones nuevas.
+
+## Configuración: reglas de guardado del usuario
+
+La sección Configuración deja al propietario escribir en sus palabras cuándo
+guardar, qué dejar afuera y cómo modelar. Se guardan por base en
+`PersonalDatabase.saving_instructions` (hasta 4000 caracteres, migración 0005) con
+su fecha de actualización. La interfaz ofrece sugerencias que agregan texto sin
+duplicarlo, contador de caracteres, descarte de cambios y aviso de que estas reglas
+no cambian permisos.
+
+Lectura: `saving_instructions` es tool MCP de solo lectura y `list_databases`
+devuelve el texto para las bases propias, así que el asistente las ve al empezar.
+Escritura: solo `update_saving_instructions` por web, propietario autenticado y
+CSRF. Los invitados no leen ni editan las reglas de otra persona: la vista muestra
+un aviso y no llama a la acción. `INSTRUCTIONS` indica seguirlas como preferencias
+del usuario que nunca amplían permisos, saltan validación ni relajan las reglas de
+confianza.
+
+## Conectar asistente: clientes soportados
+
+La guía cubre Claude Code, Claude Desktop, Kiro, Codex y MCP genérico con la misma
+URL del servidor. Claude Desktop, claude.ai y las apps móviles comparten conectores
+personalizados: se agregan en Conectores con la URL remota y Anthropic conecta desde
+su nube, por lo que un endpoint en localhost o detrás de VPN no sirve; en Team y
+Enterprise lo agrega un Owner. Kiro se configura por archivo
+(`~/.kiro/settings/mcp.json` global o `.kiro/settings/mcp.json` del proyecto) o con
+`kiro-cli mcp import`; ni Kiro ni Claude ofrecen enlace de instalación de un clic y
+la interfaz lo dice en lugar de inventar uno. Para Cursor se genera el deeplink
+documentado `cursor://anysphere.cursor-deeplink/mcp/install` y para VS Code el
+comando `code --add-mcp`.

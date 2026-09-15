@@ -4,7 +4,8 @@ Workdir /home/gastonzarate/repos/opendb/opendb. Branch feat/mvp. No push.
 Parent owns opendb/databases/**, shared settings/dependencies/Compose and integration.
 
 ## Database API implemented by parent
-- PersonalDatabase: id UUID, owner FK, database_name, role_name, status.
+- PersonalDatabase: id UUID, owner FK, database_name, role_name, status,
+ saving_instructions (owner text <=4000), saving_instructions_updated_at.
 - provision_personal_database(owner_id:int) -> PersonalDatabase (administrative).
 - owner_connection(owner_id:int,database_id) -> context manager psycopg.Connection.
 - data_connection(actor_id:int,database_id) -> context manager authenticated as own/guest role.
@@ -13,7 +14,12 @@ Parent owns opendb/databases/**, shared settings/dependencies/Compose and integr
 - databases.services.dispatch(actor_id:int, action:str, payload:dict) -> JSON-safe result.
 Actions: list_databases, create_database, catalog, query, ingest, create_role,
  grant_object, assign_role, revoke_role, revoke_object, list_access, register_vector,
- search_vectors, vector_status, ingestion_history.
+ search_vectors, vector_status, ingestion_history, saving_instructions.
+Owner-only saving_instructions {database_id} returns {database_id,instructions,max_length,
+ updated_at}; web-only update_saving_instructions {database_id,instructions} normalizes
+ line endings, trims and rejects non-text or more than 4000 characters.
+list_databases includes saving_instructions for owned databases so the assistant reads
+ the owner preferences before saving; they never widen permissions.
 Identity is actor_id from validated authentication, NEVER supplied payload.
 query payload {database_id,sql,parameters?:list}; ingest {database_id,operation:dict}.
 sharing identifiers: role_id UUID, email, object_name (data schema only).

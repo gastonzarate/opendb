@@ -87,6 +87,52 @@ def test_onboarding_is_persistent_idempotent_and_owner_only(personal_db):
     assert dispatch(actor, "create_database", {})["onboarding_completed"] is True
 
 
+def test_saving_instructions_are_owner_only_persistent_and_bounded(personal_db):
+    actor = personal_db.owner_id
+    payload = {"database_id": str(personal_db.pk)}
+    assert dispatch(actor, "saving_instructions", payload)["instructions"] == ""
+    assert dispatch(actor, "list_databases", {})[0]["saving_instructions"] == ""
+    stranger = UserFactory()
+    for action, body in [
+        ("saving_instructions", payload),
+        ("update_saving_instructions", {**payload, "instructions": "leaked"}),
+    ]:
+        with pytest.raises(PermissionDenied):
+            dispatch(stranger.pk, action, body)
+    stored = dispatch(
+        actor,
+        "update_saving_instructions",
+        {**payload, "instructions": "  Guardá cada reunión.\r\nNo guardes tarjetas. "},
+    )
+    assert stored["instructions"] == "Guardá cada reunión.\nNo guardes tarjetas."
+    assert stored["updated_at"] is not None
+    assert stored["max_length"] == 4000
+    reread = dispatch(actor, "saving_instructions", payload)
+    assert reread["instructions"] == stored["instructions"]
+    assert (
+        dispatch(actor, "list_databases", {})[0]["saving_instructions"]
+        == (stored["instructions"])
+    )
+    with pytest.raises(ValueError, match="at most 4000 characters"):
+        dispatch(
+            actor,
+            "update_saving_instructions",
+            {**payload, "instructions": "x" * 4001},
+        )
+    with pytest.raises(ValueError, match="must be text"):
+        dispatch(
+            actor, "update_saving_instructions", {**payload, "instructions": {"a": 1}}
+        )
+    assert (
+        dispatch(actor, "saving_instructions", payload)["instructions"]
+        == (stored["instructions"])
+    )
+    cleared = dispatch(
+        actor, "update_saving_instructions", {**payload, "instructions": ""}
+    )
+    assert cleared["instructions"] == ""
+
+
 def test_role_description_create_update_and_authorization(personal_db):
     actor = personal_db.owner_id
     payload = {"database_id": str(personal_db.pk)}
