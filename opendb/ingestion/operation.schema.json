@@ -312,6 +312,20 @@
         {
           "type": "object",
           "properties": {
+            "$source": {
+              "const": "content",
+              "type": "string",
+              "description": "Reuse source.content verbatim in a text, varchar or char record column."
+            }
+          },
+          "required": [
+            "$source"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
             "$ref": {
               "type": "string",
               "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}\\.[A-Za-z_][A-Za-z0-9_]{0,62}$",

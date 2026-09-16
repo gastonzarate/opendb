@@ -224,3 +224,26 @@ def test_exported_json_schema_accepts_examples_and_rejects_untyped_records():
     bad["records"][0]["values"]["amount"] = "12.50"
     with pytest.raises(jsonschema.ValidationError):
         validator.validate(bad)
+
+
+def test_source_content_reference_is_strict_and_in_public_schema():
+    from jsonschema import Draft202012Validator
+
+    from opendb.ingestion import operation_schema
+
+    data = operation()
+    data["records"][0]["values"]["description"] = {"$source": "content"}
+    validate_operation(data)
+    Draft202012Validator(operation_schema()).validate(data)
+
+    for malformed in (
+        {"$source": "media_type"},
+        {"$source": None},
+        {"$source": "content", "type": "text"},
+        {"$source": "content", "$ref": "expense.id"},
+    ):
+        invalid_data = copy.deepcopy(data)
+        invalid_data["records"][0]["values"]["description"] = malformed
+        with pytest.raises(IngestionError):
+            validate_operation(invalid_data)
+        assert list(Draft202012Validator(operation_schema()).iter_errors(invalid_data))

@@ -143,6 +143,22 @@ def _identifiers(value, *, empty=False):
         raise invalid()
 
 
+def _record_value(value, previous):
+    if isinstance(value, dict) and "$ref" in value:
+        _keys(value, {"$ref"})
+        if not isinstance(value["$ref"], str):
+            raise invalid()
+        reference, separator, returned_column = value["$ref"].partition(".")
+        if not separator or returned_column not in previous.get(reference, []):
+            raise invalid()
+    elif isinstance(value, dict) and "$source" in value:
+        _keys(value, {"$source"})
+        if value["$source"] != "content":
+            raise invalid()
+    else:
+        decode_value(value)
+
+
 def _record(record, previous):
     _keys(record, {"ref", "table", "values", "returning"}, {"on_conflict"})
     identifier(record["ref"])
@@ -152,15 +168,7 @@ def _record(record, previous):
     _identifiers(record["returning"])
     for column, value in record["values"].items():
         identifier(column)
-        if isinstance(value, dict) and "$ref" in value:
-            _keys(value, {"$ref"})
-            if not isinstance(value["$ref"], str):
-                raise invalid()
-            reference, separator, returned_column = value["$ref"].partition(".")
-            if not separator or returned_column not in previous.get(reference, []):
-                raise invalid()
-        else:
-            decode_value(value)
+        _record_value(value, previous)
     if "on_conflict" in record:
         conflict = record["on_conflict"]
         _keys(conflict, {"columns", "update"})

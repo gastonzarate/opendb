@@ -547,3 +547,55 @@ def test_ready_existing_index_does_not_claim_new_column_is_indexed(
     assert result["indexing"]["status"] == "queued_for_discovery"
     assert result["indexing"]["automatic_discovery"] == "pending"
     assert ingestion.apply(owner_conn, copy.deepcopy(operation)) == result
+
+
+def test_source_content_reference_preserves_large_original_once(owner_conn, admin_conn):
+    original = "Cabecera UTF-8: reunión\n" + ("línea exacta 0123456789\n" * 2500)
+    operation = expense_operation(owner_conn, "source-content-large")
+    operation["source"]["content"] = original
+    operation["statements"] = [
+        (
+            "CREATE TABLE data.raw_documents ("
+            "id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, body text NOT NULL)"
+        )
+    ]
+    operation["records"] = [
+        {
+            "ref": "document",
+            "table": "raw_documents",
+            "returning": ["id"],
+            "values": {"body": {"$source": "content"}},
+        }
+    ]
+    operation["annotations"] = []
+
+    result = ingestion.apply(owner_conn, operation)
+
+    assert result["records"]["document"]["id"] > 0
+    assert owner_conn.execute("SELECT body FROM data.raw_documents").fetchone() == (
+        original,
+    )
+    assert operation["records"][0]["values"]["body"] == {"$source": "content"}
+    assert admin_conn.execute(
+        "SELECT source->>'content' FROM opendb_catalog.ingestion_operations"
+    ).fetchone() == (original,)
+    assert ingestion.apply(owner_conn, copy.deepcopy(operation)) == result
+
+
+def test_source_content_reference_rejects_non_text_column(owner_conn, admin_conn):
+    operation = expense_operation(owner_conn, "source-content-wrong-type")
+    operation["records"][0]["values"]["amount"] = {"$source": "content"}
+
+    with pytest.raises(ingestion.IngestionError) as exc:
+        ingestion.apply(owner_conn, operation)
+
+    assert exc.value.code == "invalid_operation"
+    assert (
+        owner_conn.execute("SELECT to_regclass('data.expenses')").fetchone()[0] is None
+    )
+    assert (
+        admin_conn.execute(
+            "SELECT count(*) FROM opendb_catalog.ingestion_operations"
+        ).fetchone()[0]
+        == 0
+    )

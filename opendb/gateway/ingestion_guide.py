@@ -127,7 +127,9 @@ def ingestion_guide():
             ),
             (
                 "Record refs must be unique. A $ref may only reference a "
-                "column explicitly returned by an earlier record."
+                "column explicitly returned by an earlier record. Use "
+                '{"$source": "content"} to reuse source.content verbatim in a '
+                "text, varchar or char record column without duplicating it."
             ),
             (
                 "on_conflict.columns and on_conflict.update must be "

@@ -1,4 +1,4 @@
-"""Parameterized row writes; references resolve only to earlier RETURNING values."""
+"""Parameterized row writes with strict returned-value and source references."""
 
 import datetime as dt
 from decimal import Decimal
@@ -39,10 +39,17 @@ def json_safe(value):
     raise invalid()
 
 
-def _record_value(envelope, actual_type, returned):
+def _record_value(envelope, actual_type, returned, source):
     if "$ref" in envelope:
         ref, column = envelope["$ref"].split(".")
         value = returned[ref][column]
+    elif "$source" in envelope:
+        if (
+            envelope["$source"] != "content"
+            or actual_type not in POSTGRES_TYPES["text"]
+        ):
+            raise invalid()
+        value = source["content"]
     else:
         if actual_type not in POSTGRES_TYPES[envelope["type"]]:
             raise invalid()
@@ -52,7 +59,7 @@ def _record_value(envelope, actual_type, returned):
     return value
 
 
-def write_record(cur, record, returned):
+def write_record(cur, record, returned, source):
     cur.execute(
         "SELECT a.attname, t.typname, a.attgenerated, a.attidentity "
         "FROM pg_catalog.pg_attribute a JOIN pg_catalog.pg_class c ON c.oid=a.attrelid "
@@ -73,7 +80,7 @@ def write_record(cur, record, returned):
         actual_type, generated, identity = columns[name]
         if generated or identity == "a":
             raise invalid()
-        values.append(_record_value(envelope, actual_type, returned))
+        values.append(_record_value(envelope, actual_type, returned, source))
     names = list(record["values"])
     query = sql.SQL("INSERT INTO {} ").format(sql.Identifier("data", record["table"]))
     if names:

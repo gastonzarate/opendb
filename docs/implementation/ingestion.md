@@ -129,11 +129,14 @@ Only real tables/partitioned tables accept record writes; writing through a view
 outside this contract. Omit a column to use its database default. Empty `values` means
 DEFAULT VALUES. Generated columns and ALWAYS identity columns cannot be supplied.
 
-Each value is either `{type, value}` or `{"$ref": "earlier_ref.returned_column"}`.
-References must point to an earlier record's explicit `returning` list. Results are
-resolved with native PostgreSQL values before they are converted for the JSON response.
-At least one returned column is required so provenance can retain record identifiers;
-clients should always return the primary key.
+Each value is either `{type, value}`, `{"$ref":
+"earlier_ref.returned_column"}`, or `{"$source": "content"}`. Record references
+must point to an earlier record's explicit `returning` list. The source reference
+reuses `source.content` verbatim and is accepted only for PostgreSQL `text`, `varchar`
+or `char` columns; it avoids duplicating large originals in the operation payload.
+Results are resolved with native PostgreSQL values before they are converted for the
+JSON response. At least one returned column is required so provenance can retain
+record identifiers; clients should always return the primary key.
 
 | Type tag | JSON representation and PostgreSQL target |
 | --- | --- |

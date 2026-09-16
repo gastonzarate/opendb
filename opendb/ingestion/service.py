@@ -161,7 +161,9 @@ def apply(conn, operation):
                 cur.execute(statement)
             returned = {}
             for record in operation["records"]:
-                returned[record["ref"]] = write_record(cur, record, returned)
+                returned[record["ref"]] = write_record(
+                    cur, record, returned, operation["source"]
+                )
             for annotation in operation["annotations"]:
                 cur.execute(
                     "SELECT opendb_catalog.annotate(%s, %s, %s, %s, %s)",
