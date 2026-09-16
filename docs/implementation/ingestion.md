@@ -22,12 +22,19 @@ Examples are validated and exercised against the real restricted owner connectio
 `tests/integration/test_ingestion.py::test_exported_examples_execute_and_replay`.
 
 MCP instructions: inspect the owner's catalog and existing records first. Reuse tables,
-units and verified identities. A speaker label alone does not identify a person; the
-meeting example keeps both participants' person_id NULL. Missing dates, timezones,
-times and identities stay NULL; never invent them. Preserve the original source.
-Use an explicit UNIQUE identity for upsert, never fuzzy-name merging. Retry an exact
-operation with its original key and fingerprint; on schema conflict, rediscover and
-rebuild. The server performs no extraction or semantic identity matching.
+units and verified identities. Read and analyze each complete source before constructing
+records, then decompose it into meaningful queryable entities, relationships and ordered
+verbatim units. `source.content` is the protected raw backup and provenance artifact;
+do not duplicate or vectorize that full raw in a data column. Index the structured
+narrative units instead. For example, a meeting uses meeting, source-mentioned people,
+participants, timestamped sections and ordered turns; an invoice uses parties and line
+items; a report uses ordered sections, findings and named entities. Adapt to the source
+without inventing unsupported structure. A speaker label alone does not identify a
+person; the meeting example keeps both participants' person_id NULL. Missing dates,
+timezones, times and identities stay NULL; never invent them. Preserve the original
+source. Use an explicit UNIQUE identity for upsert, never fuzzy-name merging. Retry an
+exact operation with its original key and fingerprint; on schema conflict, rediscover
+and rebuild. The server performs no extraction or semantic identity matching.
 
 Completed implementation plan (shared workdir; no commits):
 

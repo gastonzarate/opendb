@@ -98,6 +98,19 @@ def ingestion_guide():
                 "query writes."
             ),
             (
+                "Analyze the complete document before constructing records. Decompose "
+                "every source into its smallest meaningful queryable entities, "
+                "relationships, ordered sections/items/events and verbatim units; do "
+                "not use one opaque raw blob as the domain model."
+            ),
+            (
+                "Keep the complete raw only in source.content as protected backup "
+                "and provenance. Do not duplicate or vectorize the raw backup; index "
+                "useful structured narrative units instead. For example, a meeting "
+                "becomes meetings, source-mentioned people, participants, timestamped "
+                "sections and ordered verbatim turns."
+            ),
+            (
                 "Annotate new or materially changed domain tables and non-obvious "
                 "fields with purpose, relationships and known units/temporal meaning. "
                 "Keep original text and unknown values; never invent missing "

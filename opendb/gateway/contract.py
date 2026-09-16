@@ -173,14 +173,29 @@ Saving and modeling:
   an operation after a schema conflict, read the catalog and use a new key for the
   changed payload. Do not blindly repeat a query write after a timeout or lost
   response; first inspect whether its intended effect already happened.
+- Before every ingestion, read and analyze the complete document before designing
+  records. Decompose it into the smallest meaningful queryable units supported by
+  the source: explicit entities, relationships, sections, events, statements,
+  line items, temporal markers and ordering. Even when the user calls the input
+  "raw", do not use one opaque blob as the domain model. Preserve unknowns and do
+  not invent structure that the source does not support.
+- Keep the complete original raw only in ingest.source as the protected backup and
+  provenance artifact. Do not duplicate the whole raw into a data text column and
+  do not vectorize that backup. Data tables and vector indexes should contain the
+  analyzed entities and useful verbatim units, linked back through ingestion
+  provenance. Embeddings supplement those structured units, never replace them.
+- Example: decompose a meeting into a meeting row; source-mentioned people with
+  identity-verification status; all participants, including known non-speakers;
+  timestamped sections when only section times exist; and one turn per intervention
+  with speaker, global ordinal and exact spoken text. Decompose an invoice into its
+  document metadata, parties and line items; decompose a report into ordered
+  sections, explicit claims/findings and named entities. Adapt this pattern to the
+  actual document instead of forcing every source into a meeting template.
 - Normalize meaningful entities and relationships using appropriate types, primary
-  and foreign keys, uniqueness and constraints. Preserve original text alongside
-  structured records; embeddings supplement text, never replace it. Inspect existing
-  records before merging identities: similar names alone are insufficient.
-- For a meeting, preserve participants (including non-speaking invitees when known),
-  each intervention's speaker, sequence and original text, and source timestamps.
-  Store section-level timestamps at that level if per-turn times are absent. Keep
-  unknown dates, time zones, identities and values unknown; do not manufacture them.
+  and foreign keys, uniqueness and constraints. Inspect existing records before
+  merging identities: similar names or speaker labels alone are insufficient.
+  Keep unknown dates, time zones, identities and values unknown; do not manufacture
+  them.
 - Maintain annotations for each new or materially changed domain table and each
   field with non-obvious meaning. Record purpose, relationships, source conventions,
   units/currency and temporal meaning where relevant. Keep modeling decisions and
