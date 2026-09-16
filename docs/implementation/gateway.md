@@ -151,7 +151,13 @@ Changing the signing key invalidates client tokens; changing the encryption key
 makes existing OAuth state unreadable. Back up keys and encrypted state together.
 Only values are encrypted; filenames/metadata live within the private directory.
 The JSON file storage does not deserialize Python pickles. SDK client registrations,
-transactions, codes and upstream tokens all use the supplied encrypted store.
+transactions, codes and upstream tokens all use the supplied encrypted store. The
+FastMCP-issued access JWT lasts **15 days**. It is only a reference token: every
+request still validates the stored Google token and transparently refreshes it when
+Google's shorter access token expires. If Google did not issue an upstream refresh
+token, FastMCP caps the client-facing lifetime to the upstream expiry instead of
+pretending the session can be renewed. FastMCP's local refresh-token fallback remains
+one year, while Google revocation or expiry remains authoritative.
 
 ## API contract
 

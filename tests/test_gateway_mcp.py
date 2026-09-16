@@ -79,10 +79,13 @@ def test_oauth_storage_rejects_public_directory(oauth_settings):
 async def test_real_provider_client_state_survives_restart_encrypted(oauth_settings):
     from pathlib import Path
 
+    from opendb.gateway.oauth import MCP_ACCESS_TOKEN_EXPIRY_SECONDS
     from opendb.gateway.oauth import build_google_provider
 
     first = build_google_provider()
     assert isinstance(first, GoogleProvider)
+    assert MCP_ACCESS_TOKEN_EXPIRY_SECONDS == 1_296_000
+    assert first._fastmcp_access_token_expiry_seconds == 1_296_000  # noqa: SLF001
     await first.register_client(
         OAuthClientInformationFull(
             client_id="test-mcp-client",

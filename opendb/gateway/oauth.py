@@ -15,6 +15,7 @@ from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
 from .identity import validate_google_claims
 
 MIN_SIGNING_KEY_LENGTH = 32
+MCP_ACCESS_TOKEN_EXPIRY_SECONDS = 15 * 24 * 60 * 60
 
 
 def required_setting(name):
@@ -127,5 +128,6 @@ def build_google_provider():
         client_storage=build_state_store(),
         allowed_client_redirect_uris=redirects,
         require_authorization_consent=True,
+        fastmcp_access_token_expiry_seconds=MCP_ACCESS_TOKEN_EXPIRY_SECONDS,
         enable_cimd=False,
     )
