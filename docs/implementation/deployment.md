@@ -151,6 +151,21 @@ is not ongoing dependency supervision: unhealthy dependencies do not automatical
 restart dependents. Monitor restart loops, model/indexing lag, RDS connections,
 CPU/RAM and disk capacity. Indexer output provides per-database progress/errors.
 
+## Automatic deployment on push
+
+The Compose service reads a custom Git URL, so Dokploy's zero-config GitHub
+integration does not apply. Automatic deployment needs three aligned pieces:
+Dokploy's `autoDeploy` enabled, the Compose `branch` set to the branch that is
+pushed (a mismatch answers `Branch Not Match` and deploys nothing), and a push
+webhook on the repository pointing at
+`https://<dokploy-host>/api/deploy/compose/<refreshToken>` with content type
+`application/json`. That URL's token is the only credential the endpoint checks,
+so treat it as a secret: anyone holding it can deploy the configured branch.
+
+Every accepted push then rebuilds and recreates production from the branch head,
+so the branch must stay deployable. Nothing pins a reviewed commit, and the
+environment variables in Dokploy are not versioned with the repository.
+
 Back up RDS, `mcp_state` and stable encryption/signing/credential keys together.
 The `models` volume is reproducible from the exact artifact and checksum. Keep the
 Compose project name stable so named volumes survive release updates. Never use
