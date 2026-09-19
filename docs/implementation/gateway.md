@@ -200,6 +200,16 @@ listed in `OPENDB_MCP_ALLOWED_CLIENT_REDIRECT_URIS`; that is distinct from the
 Google callback above. CIMD fetching is disabled; SDK dynamic client registration
 is enabled. The SDK's authorization-consent screen remains enabled.
 
+Local clients such as Kiro, Claude Code or the FastMCP client use RFC 8252
+loopback callbacks on ephemeral ports, which the localhost wildcards already
+cover. The hosted Claude surfaces (claude.ai web, Claude Desktop, mobile and
+Cowork) register from Anthropic's cloud with the single exact callback
+`https://claude.ai/api/mcp/auth_callback`, per the
+[connector authentication reference](https://claude.com/docs/connectors/building/authentication).
+Without that entry `/register` answers `400 invalid_redirect_uri` and Claude only
+reports that it could not register with the sign-in service, so keep it listed
+whenever those clients must connect.
+
 Connect a FastMCP client using `Client("http://localhost:8001/mcp", auth="oauth")`,
 or configure the assistant's remote Streamable HTTP MCP URL with OAuth. Tool
 instructions explain catalog-first modeling, structured ingestion, provenance,

@@ -75,7 +75,7 @@ and URI-encoded credentials; PostgreSQL keywords are also accepted for admin DSN
 | `OPENDB_GOOGLE_CLIENT_ID`, `OPENDB_GOOGLE_CLIENT_SECRET` | Required Google OAuth web client credentials. |
 | `OPENDB_MCP_JWT_SIGNING_KEY` | Required stable random signing secret of at least 32 characters. |
 | `OPENDB_MCP_STORAGE_ENCRYPTION_KEY` | Required stable Fernet key (URL-safe base64 of 32 random bytes). Back up with MCP state; losing it makes state unreadable. |
-| `OPENDB_MCP_ALLOWED_CLIENT_REDIRECT_URIS` | Required comma-separated client callback allowlist. Select approved clients; localhost wildcard callbacks are supported by existing app validation. |
+| `OPENDB_MCP_ALLOWED_CLIENT_REDIRECT_URIS` | Required comma-separated client callback allowlist. Select approved clients; localhost wildcard callbacks are supported by existing app validation. Hosted Claude surfaces (claude.ai web, Desktop, mobile, Cowork) additionally need the exact `https://claude.ai/api/mcp/auth_callback`, otherwise their dynamic registration fails with `invalid_redirect_uri`. |
 | `OPENDB_MODEL_URL` | Private presigned direct HTTPS URL required on first model initialization or invalid/missing cache. May be empty once the valid named volume exists. Supply through Dokploy, never a build argument or command line. Main agent supplies it independently. |
 | `OPENDB_IMAGE` | Optional local image tag, default `opendb-dokploy:local`; use a unique release tag when building. All app services reuse it with `pull_policy: never`. |
 | `DJANGO_ADMIN_URL` | Optional admin path, default `admin/`. |

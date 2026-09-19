@@ -9,4 +9,4 @@ OPENDB_MCP_BASE_URL=http://localhost:8001
 OPENDB_MCP_JWT_SIGNING_KEY=
 OPENDB_MCP_STORAGE_ENCRYPTION_KEY=
 OPENDB_MCP_STATE_DIRECTORY=/state/oauth
-OPENDB_MCP_ALLOWED_CLIENT_REDIRECT_URIS=http://localhost:*/*,http://127.0.0.1:*/*
+OPENDB_MCP_ALLOWED_CLIENT_REDIRECT_URIS=http://localhost:*/*,http://127.0.0.1:*/*,https://claude.ai/api/mcp/auth_callback

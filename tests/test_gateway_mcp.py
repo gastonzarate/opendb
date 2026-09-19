@@ -112,6 +112,34 @@ async def test_real_provider_client_state_survives_restart_encrypted(oauth_setti
 
 
 @pytest.mark.anyio
+async def test_hosted_claude_callback_registers_only_when_allowlisted(oauth_settings):
+    """Anthropic's cloud registers one exact HTTPS callback, not a loopback one."""
+    from mcp.server.auth.provider import RegistrationError
+
+    from opendb.gateway.oauth import build_google_provider
+
+    claude_callback = "https://claude.ai/api/mcp/auth_callback"
+    client_info = OAuthClientInformationFull(
+        client_id="hosted-claude",
+        client_name="Claude",
+        redirect_uris=[claude_callback],
+    )
+    loopback_only = build_google_provider()
+    with pytest.raises(RegistrationError) as rejected:
+        await loopback_only.register_client(client_info)
+    assert rejected.value.error == "invalid_redirect_uri"
+
+    oauth_settings.OPENDB_MCP_ALLOWED_CLIENT_REDIRECT_URIS = [
+        "http://127.0.0.1:*/*",
+        claude_callback,
+    ]
+    provider = build_google_provider()
+    await provider.register_client(client_info)
+    registered = await provider.get_client("hosted-claude")
+    assert [str(uri) for uri in registered.redirect_uris] == [claude_callback]
+
+
+@pytest.mark.anyio
 async def test_http_rejects_anonymous_and_invalid_bearer_and_exposes_discovery(
     oauth_settings,
 ):
