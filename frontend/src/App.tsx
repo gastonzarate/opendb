@@ -131,6 +131,36 @@ function Login({ boot }: { boot: Bootstrap }) {
               Google todavía no está configurado en este servidor.
             </p>
           )}
+          {boot.local_login_enabled && (
+            <>
+              <div className="login-divider" role="separator">
+                o
+              </div>
+              <form className="stack" method="post" action="/accounts/login/">
+                <input
+                  type="hidden"
+                  name="csrfmiddlewaretoken"
+                  value={boot.csrf_token}
+                />
+                <input type="hidden" name="next" value="/app/" />
+                <label className="field">
+                  Email
+                  <input type="email" name="login" required autoFocus />
+                </label>
+                <label className="field">
+                  Contraseña
+                  <input type="password" name="password" required />
+                </label>
+                <button className="btn" type="submit">
+                  Entrar con email y contraseña
+                </button>
+              </form>
+              <p className="small muted">
+                ¿No tenés cuenta local? <a href="/accounts/signup/">Creá una</a>
+                . Solo disponible en este servidor de desarrollo.
+              </p>
+            </>
+          )}
           <div className="login-divider" />
           <p className="small muted">
             <ShieldCheck size={15} /> Tus credenciales de Google nunca se
@@ -674,6 +704,7 @@ function DatabaseWorkspace({
               onboarding={onboarding}
               onComplete={() => void completeOnboarding()}
               completing={completing}
+              localLoginEnabled={boot.local_login_enabled}
             />
           </>
         ) : section === "settings" ? (

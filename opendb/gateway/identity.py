@@ -52,6 +52,19 @@ def _active_user(account):
     return account.user
 
 
+def provision_local_signup(user):
+    """Provision a personal database for a plain (non-Google) local signup.
+
+    Mirrors resolve_google_user's provisioning tail. Only reachable when
+    OPENDB_LOCAL_LOGIN_ENABLED is set; callers gate on that separately.
+    """
+    if PersonalDatabase.objects.filter(
+        owner=user, status__in=["ready", "deleted", "deleting", "delete_failed"]
+    ).exists():
+        return
+    transaction.on_commit(lambda: provision_personal_database(user.pk), robust=True)
+
+
 def resolve_google_user(claims):
     """Resolve verified identity and provision only after its transaction commits."""
     user = _resolve_google_user(claims)

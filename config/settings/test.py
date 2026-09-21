@@ -36,3 +36,7 @@ TEMPLATES[0]["OPTIONS"]["debug"] = True  # type: ignore[index]
 MEDIA_URL = "http://media.testserver/"
 # Your stuff...
 # ------------------------------------------------------------------------------
+
+# Deterministic regardless of the developer's local .envs override; tests that
+# exercise the local-login path opt in explicitly via the settings fixture.
+OPENDB_LOCAL_LOGIN_ENABLED = False

@@ -1,6 +1,8 @@
 from typing import ClassVar
 
+from django.conf import settings
 from django.contrib.auth.models import AbstractUser
+from django.db import models
 from django.db.models import CharField
 from django.db.models import EmailField
 from django.urls import reverse
@@ -36,3 +38,30 @@ class User(AbstractUser):
 
         """
         return reverse("users:detail", kwargs={"pk": self.id})
+
+
+class PersonalAccessToken(models.Model):
+    """Bearer credential for the MCP gateway, an alternative to Google OAuth.
+
+    Only the salted hash is stored; the raw value is shown once at creation.
+    Local-login-only: creation and verification both require
+    OPENDB_LOCAL_LOGIN_ENABLED, so this table stays unused in production.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="personal_access_tokens",
+    )
+    name = CharField(max_length=100, blank=True, default="")
+    token_hash = CharField(max_length=64, unique=True, editable=False)
+    prefix = CharField(max_length=20, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.name or self.prefix

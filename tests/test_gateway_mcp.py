@@ -324,7 +324,7 @@ async def test_inprocess_sdk_cannot_implicitly_bypass_identity():
 
     server = create_mcp(auth_provider=local_auth())
     async with Client(server) as client:
-        with pytest.raises(ToolError, match="Google authentication required"):
+        with pytest.raises(ToolError, match="Authentication required"):
             await client.call_tool("list_databases", {"payload": {}})
 
 
@@ -408,6 +408,90 @@ async def test_validated_sdk_google_token_resolves_django_actor(
     assert await mcp.google_actor() == actor_id
 
 
+def test_personal_access_token_claim_resolves_django_actor():
+    from opendb.gateway import mcp
+    from opendb.gateway.tokens import PAT_CLAIM
+
+    assert mcp._resolve_actor({PAT_CLAIM: 42}) == 42  # noqa: SLF001
+
+
+@pytest.mark.anyio
+async def test_verified_token_claims_skips_google_audience_for_pat(oauth_settings):
+    from opendb.gateway.oauth import verified_token_claims
+    from opendb.gateway.tokens import PAT_CLAIM
+
+    oauth_settings.OPENDB_GOOGLE_CLIENT_ID = ""
+    token = AccessToken(
+        token="mock-pat",  # noqa: S106
+        client_id="opendb-personal-access-token",
+        scopes=[],
+        expires_at=int(time.time()) + 60,
+        claims={PAT_CLAIM: 7},
+    )
+    assert verified_token_claims(token) == {PAT_CLAIM: 7}
+
+
+@pytest.mark.anyio
+@pytest.mark.django_db(transaction=True)
+async def test_load_access_token_accepts_a_valid_personal_access_token(
+    oauth_settings,
+):
+    from anyio import to_thread
+    from django.contrib.auth import get_user_model
+
+    from opendb.gateway.oauth import build_google_provider
+    from opendb.gateway.tokens import PAT_CLAIM
+    from opendb.gateway.tokens import generate_personal_access_token
+
+    oauth_settings.OPENDB_LOCAL_LOGIN_ENABLED = True
+
+    def setup():
+        user = get_user_model().objects.create_user(email="pat@example.com")
+        return generate_personal_access_token(user)
+
+    token, raw_token = await to_thread.run_sync(setup)
+    result = await build_google_provider().load_access_token(raw_token)
+    assert result.claims == {PAT_CLAIM: token.user_id}
+    assert result.expires_at > time.time()
+
+
+@pytest.mark.anyio
+async def test_load_access_token_ignores_personal_access_tokens_when_disabled(
+    oauth_settings,
+):
+    from opendb.gateway.oauth import build_google_provider
+    from opendb.gateway.tokens import PAT_PREFIX
+
+    oauth_settings.OPENDB_LOCAL_LOGIN_ENABLED = False
+    result = await build_google_provider().load_access_token(PAT_PREFIX + "fake")
+    assert result is None
+
+
+@pytest.mark.anyio
+@pytest.mark.django_db(transaction=True)
+async def test_load_access_token_rejects_a_revoked_personal_access_token(
+    oauth_settings,
+):
+    from anyio import to_thread
+    from django.contrib.auth import get_user_model
+    from django.utils import timezone
+
+    from opendb.gateway.oauth import build_google_provider
+    from opendb.gateway.tokens import generate_personal_access_token
+
+    oauth_settings.OPENDB_LOCAL_LOGIN_ENABLED = True
+
+    def setup():
+        user = get_user_model().objects.create_user(email="pat@example.com")
+        token, raw_token = generate_personal_access_token(user)
+        token.revoked_at = timezone.now()
+        token.save(update_fields=["revoked_at"])
+        return raw_token
+
+    raw_token = await to_thread.run_sync(setup)
+    assert await build_google_provider().load_access_token(raw_token) is None
+
+
 def test_standalone_asgi_factory(oauth_settings):
     from opendb.gateway.asgi import create_app
 
@@ -480,5 +564,5 @@ async def test_ingestion_resource_does_not_bypass_inprocess_auth():
     async with Client(create_mcp(auth_provider=local_auth())) as client:
         from mcp.shared.exceptions import McpError
 
-        with pytest.raises(McpError, match="Google authentication required"):
+        with pytest.raises(McpError, match="Authentication required"):
             await client.read_resource("opendb://guides/ingestion")

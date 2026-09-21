@@ -113,3 +113,36 @@ def test_existing_subject_can_login_when_registration_is_closed(settings):
     user = resolve_google_user(claims())
     settings.ACCOUNT_ALLOW_REGISTRATION = False
     assert resolve_google_user(claims()).pk == user.pk
+
+
+def test_local_signup_schedules_provisioning_after_commit(
+    django_capture_on_commit_callbacks, monkeypatch
+):
+    from opendb.gateway.identity import provision_local_signup
+
+    calls = []
+    monkeypatch.setattr(
+        "opendb.gateway.identity.provision_personal_database", calls.append
+    )
+    user = get_user_model().objects.create_user(email="local@example.com")
+    with django_capture_on_commit_callbacks(execute=True):
+        provision_local_signup(user)
+    assert calls == [user.pk]
+
+
+@pytest.mark.parametrize("status", ["ready", "deleted", "deleting", "delete_failed"])
+def test_local_signup_does_not_reprovision_an_existing_database(
+    django_capture_on_commit_callbacks, monkeypatch, status
+):
+    from opendb.databases.models import PersonalDatabase
+    from opendb.gateway.identity import provision_local_signup
+
+    calls = []
+    monkeypatch.setattr(
+        "opendb.gateway.identity.provision_personal_database", calls.append
+    )
+    user = get_user_model().objects.create_user(email="local@example.com")
+    PersonalDatabase.objects.create(owner=user, status=status)
+    with django_capture_on_commit_callbacks(execute=True):
+        provision_local_signup(user)
+    assert calls == []

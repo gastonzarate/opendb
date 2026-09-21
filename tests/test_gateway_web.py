@@ -40,18 +40,26 @@ def test_bootstrap_is_public_and_contains_only_public_fields(
     settings.OPENDB_GOOGLE_CLIENT_ID = client_id
     settings.OPENDB_GOOGLE_CLIENT_SECRET = secret
     settings.OPENDB_MCP_BASE_URL = "https://mcp.example.com"
+    settings.OPENDB_LOCAL_LOGIN_ENABLED = False
     response = client.get("/api/bootstrap/")
     assert response.status_code == 200
     data = response.json()
     assert data == {
         "csrf_token": data["csrf_token"],
         "google_configured": configured,
+        "local_login_enabled": False,
         "mcp_url": "https://mcp.example.com/mcp",
     }
     assert data["csrf_token"]
     assert response.cookies[settings.CSRF_COOKIE_NAME].value
     assert response["Cache-Control"] == "no-store"
     assert "Access-Control-Allow-Origin" not in response
+
+
+def test_bootstrap_reports_local_login_enabled(client, settings):
+    settings.OPENDB_LOCAL_LOGIN_ENABLED = True
+    response = client.get("/api/bootstrap/")
+    assert response.json()["local_login_enabled"] is True
 
 
 @pytest.mark.parametrize(

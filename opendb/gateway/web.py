@@ -21,6 +21,7 @@ def bootstrap(request):
                 settings.OPENDB_GOOGLE_CLIENT_ID
                 and settings.OPENDB_GOOGLE_CLIENT_SECRET
             ),
+            "local_login_enabled": bool(settings.OPENDB_LOCAL_LOGIN_ENABLED),
             "mcp_url": settings.OPENDB_MCP_BASE_URL.rstrip("/") + "/mcp",
         }
     )

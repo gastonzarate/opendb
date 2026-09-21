@@ -49,5 +49,14 @@ export interface Session {
 export interface Bootstrap {
   csrf_token: string;
   google_configured: boolean;
+  local_login_enabled: boolean;
   mcp_url: string;
+}
+export interface PersonalAccessToken {
+  id: number;
+  name: string;
+  prefix: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
 }

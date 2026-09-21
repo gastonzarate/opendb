@@ -325,3 +325,9 @@ OPENDB_MCP_ALLOWED_CLIENT_REDIRECT_URIS = env.list(
     "OPENDB_MCP_ALLOWED_CLIENT_REDIRECT_URIS",
     default=["http://localhost:*/*", "http://127.0.0.1:*/*"],
 )
+
+# Non-Google identity for local development only: email+password login in the
+# SPA, provisioned the same way as Google, plus personal access tokens so a
+# locally-authenticated user can also reach the MCP gateway. Off by default;
+# never enable in production, since it opens signup and MCP auth outside Google.
+OPENDB_LOCAL_LOGIN_ENABLED = env.bool("OPENDB_LOCAL_LOGIN_ENABLED", default=False)

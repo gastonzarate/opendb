@@ -233,6 +233,52 @@ describe("ConnectPanel onboarding and setup", () => {
     );
   });
 
+  it("hides the personal access token panel unless local login is enabled", () => {
+    render(<ConnectPanel mcpUrl="https://datos.example/mcp/" />);
+    expect(
+      screen.queryByText("Alternativa local sin Google"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("creates and revokes a personal access token when local login is enabled", async () => {
+    let tokens: unknown[] = [];
+    const fetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/api/personal-access-tokens/"))
+        return { ok: true, json: async () => ({ tokens }) };
+      if (url.endsWith("/api/personal-access-tokens/create/")) {
+        const token = {
+          id: 1,
+          name: "laptop",
+          prefix: "odbpat_abc123",
+          created_at: "2026-01-01T00:00:00Z",
+          last_used_at: null,
+          revoked_at: null,
+        };
+        tokens = [token];
+        return {
+          ok: true,
+          json: async () => ({ token, raw_token: "odbpat_abc123secret" }),
+        };
+      }
+      if (url.endsWith("/1/revoke/")) {
+        return { ok: true, json: async () => ({ result: "revoked" }) };
+      }
+      return { ok: true, json: async () => ({ tokens }) };
+    });
+    vi.stubGlobal("fetch", fetch);
+    render(
+      <ConnectPanel mcpUrl="https://datos.example/mcp/" localLoginEnabled />,
+    );
+    await screen.findByText("Alternativa local sin Google");
+    fireEvent.click(screen.getByRole("button", { name: "Generar token" }));
+    expect(
+      await screen.findByLabelText("Token generado (se muestra una sola vez)"),
+    ).toHaveValue("odbpat_abc123secret");
+    expect(screen.getByText("odbpat_abc123…")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Revocar token" }));
+    await screen.findByText("Revocado");
+  });
+
   it("discards copy feedback from a previous endpoint", async () => {
     let finish!: () => void;
     vi.stubGlobal("navigator", {

@@ -4,18 +4,28 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from anyio import to_thread
 from cryptography.fernet import Fernet
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.core.exceptions import PermissionDenied
+from django.db import close_old_connections
+from django.db import connections
+from fastmcp.server.auth.auth import AccessToken
 from fastmcp.server.auth.providers.google import GoogleProvider
 from key_value.aio.stores.filetree import FileTreeStore
 from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
 
 from .identity import validate_google_claims
+from .tokens import PAT_CLAIM
+from .tokens import PAT_PREFIX
+from .tokens import resolve_personal_access_token
 
 MIN_SIGNING_KEY_LENGTH = 32
 MCP_ACCESS_TOKEN_EXPIRY_SECONDS = 15 * 24 * 60 * 60
+# Personal access tokens are revoked in the database, not by expiry; this only
+# bounds how long a single fastmcp AccessToken object stays valid in memory.
+PAT_ACCESS_TOKEN_TTL_SECONDS = 15 * 24 * 60 * 60
 
 
 def required_setting(name):
@@ -28,22 +38,59 @@ def required_setting(name):
 
 def verified_token_claims(token):
     """Check upstream Google audience and identity after SDK token validation."""
-    if (
-        token is None
-        or token.claims.get("aud") != required_setting("OPENDB_GOOGLE_CLIENT_ID")
-        or token.expires_at is None
-        or token.expires_at <= time.time()
-    ):
+    if token is None or token.expires_at is None or token.expires_at <= time.time():
+        msg = "Google authentication required."
+        raise PermissionDenied(msg)
+    if PAT_CLAIM in token.claims:
+        # Already resolved to a concrete, non-revoked local user by
+        # _load_personal_access_token; no Google-specific claim to check.
+        return token.claims
+    if token.claims.get("aud") != required_setting("OPENDB_GOOGLE_CLIENT_ID"):
         msg = "Google authentication required."
         raise PermissionDenied(msg)
     validate_google_claims(token.claims)
     return token.claims
 
 
+def _resolve_personal_access_token_sync(raw_token):
+    close_old_connections()
+    try:
+        return resolve_personal_access_token(raw_token)
+    finally:
+        connections.close_all()
+
+
+async def _load_personal_access_token(token):
+    """Local-login-only alternative to Google for the MCP bearer token."""
+    if not getattr(settings, "OPENDB_LOCAL_LOGIN_ENABLED", False):
+        return None
+    if not isinstance(token, str) or not token.startswith(PAT_PREFIX):
+        # Avoid a thread-pool round trip for every ordinary Google token.
+        return None
+    user_id = await to_thread.run_sync(_resolve_personal_access_token_sync, token)
+    if user_id is None:
+        return None
+    return AccessToken(
+        token=token,
+        client_id="opendb-personal-access-token",
+        scopes=[],
+        expires_at=int(time.time()) + PAT_ACCESS_TOKEN_TTL_SECONDS,
+        claims={PAT_CLAIM: user_id},
+    )
+
+
 class OpenDBGoogleProvider(GoogleProvider):
-    """GoogleProvider additionally bound to OpenDB's OAuth client audience."""
+    """GoogleProvider additionally bound to OpenDB's OAuth client audience.
+
+    Also accepts a personal access token as a non-Google bearer credential,
+    but only when OPENDB_LOCAL_LOGIN_ENABLED is set; production deployments
+    never enable that flag, so this stays Google-only there.
+    """
 
     async def load_access_token(self, token):
+        pat_access_token = await _load_personal_access_token(token)
+        if pat_access_token is not None:
+            return pat_access_token
         validated = await super().load_access_token(token)
         try:
             verified_token_claims(validated)

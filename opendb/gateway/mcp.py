@@ -25,6 +25,7 @@ from .identity import resolve_google_user
 from .ingestion_guide import ingestion_guide
 from .oauth import build_google_provider
 from .oauth import verified_token_claims
+from .tokens import PAT_CLAIM
 
 
 def _django_call(function, *args):
@@ -40,6 +41,8 @@ def _django_call(function, *args):
 
 
 def _resolve_actor(claims):
+    if PAT_CLAIM in claims:
+        return claims[PAT_CLAIM]
     return resolve_google_user(claims).pk
 
 
@@ -69,7 +72,7 @@ def _tool(action, actor_dependency, dispatcher, limiter):
             )
         except PermissionDenied as exc:
             # Authentication and permission failures must not leak object names.
-            message = "Google authentication required or insufficient permission."
+            message = "Authentication required or insufficient permission."
             raise ToolError(message) from exc
         except ObjectDoesNotExist as exc:
             msg = "Requested resource was not found."
@@ -122,7 +125,7 @@ def create_mcp(*, auth_provider=None, actor_dependency=None, dispatcher=None):
         try:
             await actor_dependency()
         except PermissionDenied as exc:
-            message = "Google authentication required."
+            message = "Authentication required."
             raise ResourceError(message) from exc
         return await to_thread.run_sync(ingestion_guide, limiter=limiter)
 

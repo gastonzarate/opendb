@@ -1,4 +1,12 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { KeyRound, Trash2 } from "lucide-react";
+import {
+  ApiError,
+  createPersonalAccessToken,
+  listPersonalAccessTokens,
+  revokePersonalAccessToken,
+} from "./api";
+import type { PersonalAccessToken } from "./types";
 
 type ConnectPanelProps = {
   mcpUrl: string;
@@ -6,6 +14,7 @@ type ConnectPanelProps = {
   databaseReady?: boolean;
   onComplete?: () => void;
   completing?: boolean;
+  localLoginEnabled?: boolean;
 };
 
 const clients = [
@@ -74,6 +83,7 @@ function ConnectionInstructions({
   databaseReady = true,
   onComplete,
   completing = false,
+  localLoginEnabled = false,
 }: ConnectPanelProps) {
   const [client, setClient] = useState<Client>("Claude Code");
   const id = useId();
@@ -351,6 +361,7 @@ function ConnectionInstructions({
           </>
         )}
       </div>
+      {localLoginEnabled && <PersonalAccessTokenPanel mcpUrl={mcpUrl} />}
       <section className="stack" aria-label="Prueba de lectura">
         <h3>Prueba el acceso sin cambiar datos</h3>
         <p>
@@ -391,6 +402,163 @@ function ConnectionInstructions({
             Ir a mis datos
           </button>
         </div>
+      )}
+    </section>
+  );
+}
+
+function PersonalAccessTokenPanel({ mcpUrl }: { mcpUrl: string }) {
+  const id = useId();
+  const [tokens, setTokens] = useState<PersonalAccessToken[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [name, setName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [rawToken, setRawToken] = useState("");
+  const [error, setError] = useState("");
+  const lifetime = useRef(0);
+  const refresh = async () => {
+    const started = ++lifetime.current;
+    setLoading(true);
+    try {
+      const { tokens: list } = await listPersonalAccessTokens();
+      if (lifetime.current === started) setTokens(list);
+    } catch (cause) {
+      if (lifetime.current === started)
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : "No pudimos leer tus tokens.",
+        );
+    } finally {
+      if (lifetime.current === started) setLoading(false);
+    }
+  };
+  useEffect(() => {
+    void refresh();
+  }, []);
+  const create = async () => {
+    setCreating(true);
+    setError("");
+    try {
+      const { token, raw_token: raw } = await createPersonalAccessToken(name);
+      setTokens((current) => [token, ...current]);
+      setRawToken(raw);
+      setName("");
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "No pudimos crear el token.",
+      );
+    } finally {
+      setCreating(false);
+    }
+  };
+  const revoke = async (tokenId: number) => {
+    setError("");
+    try {
+      await revokePersonalAccessToken(tokenId);
+      setTokens((current) =>
+        current.map((item) =>
+          item.id === tokenId
+            ? { ...item, revoked_at: new Date().toISOString() }
+            : item,
+        ),
+      );
+    } catch (cause) {
+      if (!(cause instanceof ApiError && cause.status === 404))
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : "No pudimos revocar el token.",
+        );
+    }
+  };
+  return (
+    <section className="stack" aria-label="Token personal de acceso">
+      <h3>
+        <KeyRound size={16} /> Alternativa local sin Google
+      </h3>
+      <p className="small muted">
+        Solo disponible en este servidor de desarrollo. Generá un token y usalo
+        como credencial Bearer en tu cliente MCP en lugar de iniciar sesión con
+        Google.
+      </p>
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
+      {rawToken && (
+        <div className="stack">
+          <CopyBlock
+            label="Token generado (se muestra una sola vez)"
+            button="Copiar token"
+            value={rawToken}
+          />
+          {mcpUrl && (
+            <CopyBlock
+              label="Configuración MCP con token"
+              button="Copiar configuración"
+              value={JSON.stringify(
+                {
+                  mcpServers: {
+                    opendb: {
+                      url: mcpUrl,
+                      headers: { Authorization: `Bearer ${rawToken}` },
+                    },
+                  },
+                },
+                null,
+                2,
+              )}
+              rows={6}
+            />
+          )}
+        </div>
+      )}
+      <div className="form-row">
+        <label className="field" htmlFor={`${id}-name`}>
+          Nombre del token (opcional)
+          <input
+            id={`${id}-name`}
+            type="text"
+            value={name}
+            placeholder="ej. laptop"
+            maxLength={100}
+            disabled={creating}
+            onChange={(event) => setName(event.target.value)}
+          />
+        </label>
+        <button
+          type="button"
+          className="btn"
+          disabled={creating}
+          onClick={() => void create()}
+        >
+          {creating ? "Generando…" : "Generar token"}
+        </button>
+      </div>
+      {!loading && tokens.length > 0 && (
+        <ul className="token-list">
+          {tokens.map((token) => (
+            <li key={token.id} className="inline">
+              <code>{token.prefix}…</code>
+              <span className="small muted">{token.name || "sin nombre"}</span>
+              {token.revoked_at ? (
+                <span className="small muted">Revocado</span>
+              ) : (
+                <button
+                  type="button"
+                  className="icon-btn"
+                  title="Revocar token"
+                  aria-label="Revocar token"
+                  onClick={() => void revoke(token.id)}
+                >
+                  <Trash2 size={14} />
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
       )}
     </section>
   );

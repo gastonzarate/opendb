@@ -39,6 +39,18 @@ def google_client():
     return client, user
 
 
+@pytest.fixture
+def local_login_client(settings):
+    settings.OPENDB_LOCAL_LOGIN_ENABLED = True
+    user = get_user_model().objects.create_user(email="local@example.com")
+    client = Client(enforce_csrf_checks=True)
+    client.force_login(user)
+    session = client.session
+    session["account_authentication_methods"] = [{"method": "password"}]
+    session.save()
+    return client, user
+
+
 def post(client, action, payload):
     csrf = client.get("/api/session/").json()["csrf_token"]
     return client.post(
@@ -77,6 +89,107 @@ def test_session_returns_identity_and_csrf_token(google_client):
     assert response.json()["user"] == {"id": user.pk, "email": user.email}
     assert response.json()["csrf_token"]
     assert response["Cache-Control"] == "no-store"
+
+
+def test_local_password_session_can_use_api_when_local_login_enabled(
+    local_login_client,
+):
+    client, user = local_login_client
+    response = client.get("/api/session/")
+    assert response.status_code == 200
+    assert response.json()["user"] == {"id": user.pk, "email": user.email}
+
+
+def test_local_password_session_cannot_use_api_when_local_login_disabled(settings):
+    settings.OPENDB_LOCAL_LOGIN_ENABLED = True
+    user = get_user_model().objects.create_user(email="local@example.com")
+    client = Client(enforce_csrf_checks=True)
+    client.force_login(user)
+    session = client.session
+    session["account_authentication_methods"] = [{"method": "password"}]
+    session.save()
+    settings.OPENDB_LOCAL_LOGIN_ENABLED = False
+    assert client.get("/api/session/").status_code == 401
+
+
+def test_personal_access_tokens_endpoint_hidden_when_local_login_disabled(
+    google_client,
+):
+    client, _ = google_client
+    assert client.get("/api/personal-access-tokens/").status_code == 404
+
+
+def test_create_list_and_revoke_personal_access_token(local_login_client):
+    client, user = local_login_client
+    csrf = client.get("/api/session/").json()["csrf_token"]
+
+    created = client.post(
+        "/api/personal-access-tokens/create/",
+        json.dumps({"name": "laptop"}),
+        content_type="application/json",
+        HTTP_X_CSRFTOKEN=csrf,
+    )
+    assert created.status_code == 201
+    body = created.json()
+    assert body["raw_token"].startswith("odbpat_")
+    assert body["token"]["name"] == "laptop"
+    token_id = body["token"]["id"]
+
+    listed = client.get("/api/personal-access-tokens/")
+    assert listed.status_code == 200
+    [row] = listed.json()["tokens"]
+    assert row["id"] == token_id
+    assert row["revoked_at"] is None
+    assert body["raw_token"] not in json.dumps(row)
+
+    from opendb.gateway.tokens import resolve_personal_access_token
+
+    assert resolve_personal_access_token(body["raw_token"]) == user.pk
+
+    revoked = client.post(
+        f"/api/personal-access-tokens/{token_id}/revoke/",
+        content_type="application/json",
+        HTTP_X_CSRFTOKEN=csrf,
+    )
+    assert revoked.status_code == 200
+    assert (
+        client.get("/api/personal-access-tokens/").json()["tokens"][0]["revoked_at"]
+        is not None
+    )
+    assert resolve_personal_access_token(body["raw_token"]) is None
+
+    again = client.post(
+        f"/api/personal-access-tokens/{token_id}/revoke/",
+        content_type="application/json",
+        HTTP_X_CSRFTOKEN=csrf,
+    )
+    assert again.status_code == 404
+
+
+def test_personal_access_tokens_are_scoped_to_their_owner(settings):
+    from opendb.gateway.tokens import generate_personal_access_token
+
+    settings.OPENDB_LOCAL_LOGIN_ENABLED = True
+    owner = get_user_model().objects.create_user(email="owner2@example.com")
+    other = get_user_model().objects.create_user(email="other2@example.com")
+    owner_token, _ = generate_personal_access_token(owner)
+
+    client = Client(enforce_csrf_checks=True)
+    client.force_login(other)
+    session = client.session
+    session["account_authentication_methods"] = [{"method": "password"}]
+    session.save()
+
+    assert client.get("/api/personal-access-tokens/").json()["tokens"] == []
+    csrf = client.get("/api/session/").json()["csrf_token"]
+    response = client.post(
+        f"/api/personal-access-tokens/{owner_token.pk}/revoke/",
+        content_type="application/json",
+        HTTP_X_CSRFTOKEN=csrf,
+    )
+    assert response.status_code == 404
+    owner_token.refresh_from_db()
+    assert owner_token.revoked_at is None
 
 
 def test_api_dispatches_with_session_actor(google_client, monkeypatch):

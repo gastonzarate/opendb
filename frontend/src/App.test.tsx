@@ -25,6 +25,52 @@ it("signed-out users see Google login, not invented data", async () => {
   expect(screen.queryByRole("table")).not.toBeInTheDocument();
 });
 
+it("local login form only appears when the server enables it", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) =>
+      url.includes("bootstrap")
+        ? {
+            ok: true,
+            json: async () => ({
+              csrf_token: "csrf",
+              google_configured: true,
+              local_login_enabled: true,
+              mcp_url: "http://localhost:8001/mcp",
+            }),
+          }
+        : { ok: false, status: 401, json: async () => ({}) },
+    ),
+  );
+  render(<App />);
+  await screen.findByRole("button", { name: "Continuar con Google" });
+  expect(screen.getByLabelText("Email")).toBeInTheDocument();
+  expect(screen.getByLabelText("Contraseña")).toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "Entrar con email y contraseña" }),
+  ).toBeInTheDocument();
+});
+it("local login form is absent by default", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) =>
+      url.includes("bootstrap")
+        ? {
+            ok: true,
+            json: async () => ({
+              csrf_token: "csrf",
+              google_configured: true,
+              local_login_enabled: false,
+              mcp_url: "http://localhost:8001/mcp",
+            }),
+          }
+        : { ok: false, status: 401, json: async () => ({}) },
+    ),
+  );
+  render(<App />);
+  await screen.findByRole("button", { name: "Continuar con Google" });
+  expect(screen.queryByLabelText("Email")).not.toBeInTheDocument();
+});
 function authenticatedFixture(
   own: Record<string, unknown> | null,
   shared = false,

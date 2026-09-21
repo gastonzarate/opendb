@@ -15,7 +15,10 @@ if typing.TYPE_CHECKING:
 
 class AccountAdapter(DefaultAccountAdapter):
     def is_open_for_signup(self, request: HttpRequest) -> bool:
-        return getattr(settings, "ACCOUNT_ALLOW_REGISTRATION", True)
+        """Direct email+password signup is a local-dev-only alternative to Google."""
+        return getattr(settings, "OPENDB_LOCAL_LOGIN_ENABLED", False) and getattr(
+            settings, "ACCOUNT_ALLOW_REGISTRATION", True
+        )
 
 
 class SocialAccountAdapter(DefaultSocialAccountAdapter):
