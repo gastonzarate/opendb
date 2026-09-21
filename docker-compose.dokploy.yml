@@ -112,7 +112,7 @@ services:
         condition: service_completed_successfully
 
   redis:
-    image: redis:7.4-alpine
+    image: redis:8.0-alpine
     platform: linux/arm64
     restart: unless-stopped
     networks: [app]
