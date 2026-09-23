@@ -57,6 +57,9 @@ FUNCTIONS = {
     "to_timestamp",
     "json_build_object",
     "jsonb_build_object",
+    "jsonb_array_elements",
+    "jsonb_to_recordset",
+    "md5",
     "json_agg",
     "jsonb_agg",
     "array_agg",
@@ -209,7 +212,11 @@ def validate_sql(statement: str, *, readonly: bool = False) -> None:
                 if kind == "FuncCall":
                     names = _strings(value["funcname"])
                     if len(names) != 1 or names[0].lower() not in FUNCTIONS:
-                        msg = "Function is not supported"
+                        name = ".".join(names)
+                        msg = (
+                            f"Function is not supported: {name!r}. "
+                            "See ingestion_guide.query_policy.allowed_functions"
+                        )
                         raise ValueError(msg)
                 if kind == "TypeName":
                     names = _strings(value["names"])

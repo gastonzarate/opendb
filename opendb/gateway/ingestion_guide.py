@@ -4,6 +4,7 @@
 def ingestion_guide():
     """Load the canonical schema/example at request time, alongside DBA guidance."""
     # Lazy import keeps gateway startup independent of peer initialization.
+    from opendb.databases.sql_policy import FUNCTIONS  # noqa: PLC0415
     from opendb.ingestion import example_operation  # noqa: PLC0415
     from opendb.ingestion import operation_schema  # noqa: PLC0415
     from opendb.vectors.discovery import configuration  # noqa: PLC0415
@@ -11,6 +12,16 @@ def ingestion_guide():
     threshold, narrative_columns = configuration()
 
     return {
+        "query_policy": {
+            "allowed_functions": sorted(FUNCTIONS),
+            "function_names": (
+                "Use unqualified function names; qualified calls are rejected."
+            ),
+            "writable_ctes": "Owner only; one statement executes atomically.",
+            "ingestion_statements": (
+                "Transactional DDL strings only; use records for ingestion DML."
+            ),
+        },
         "schema": operation_schema(),
         "table_annotations": {
             "description": "Clear business description of what the table represents.",

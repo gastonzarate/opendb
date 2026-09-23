@@ -183,3 +183,44 @@ def test_cte_names_never_authorize_unqualified_write_targets(statement):
 
     with pytest.raises(ValueError, match="explicitly qualified"):
         validate_sql(statement)
+
+
+@pytest.mark.parametrize("readonly", [True, False])
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "SELECT * FROM jsonb_array_elements($1::jsonb)",
+        "SELECT * FROM jsonb_to_recordset($1::jsonb) AS t(id integer, title text)",
+        "SELECT md5(string_agg(title, ',')) FROM data.meetings",
+    ],
+)
+def test_safe_json_expansion_and_hash_functions_are_supported(statement, readonly):
+    from opendb.databases.sql_policy import validate_sql
+
+    validate_sql(statement, readonly=readonly)
+
+
+@pytest.mark.parametrize("function", ["pg_read_file", "pg_sleep", "public.md5"])
+def test_blocked_function_error_names_the_function(function):
+    from opendb.databases.sql_policy import validate_sql
+
+    with pytest.raises(ValueError, match="Function is not supported") as error:
+        validate_sql(f"SELECT {function}('private value')")
+    assert function in str(error.value)
+    assert "private value" not in str(error.value)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "INSERT INTO data.costs VALUES (1) RETURNING id",
+        "UPDATE data.costs SET id=1 RETURNING id",
+        "DELETE FROM data.costs RETURNING id",
+    ],
+)
+def test_writable_ctes_remain_forbidden_for_readonly_callers(mutation):
+    from opendb.databases.sql_policy import validate_sql
+
+    statement = f"WITH m AS ({mutation}) SELECT * FROM m"  # noqa: S608 -- Static fixtures.
+    with pytest.raises(ValueError, match="Nested statement is not supported"):
+        validate_sql(statement, readonly=True)

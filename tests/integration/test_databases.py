@@ -310,3 +310,147 @@ def test_response_limit_includes_column_names(personal_db, monkeypatch):
                 "sql": "SELECT 1 AS column_name_larger_than_the_row_data",
             },
         )
+
+
+def test_writable_cte_is_atomic_and_drains_all_rows(personal_db, owner_conn):
+    from opendb.databases.services import dispatch
+
+    owner_conn.execute("CREATE TABLE data.parents (id int PRIMARY KEY)")
+    owner_conn.execute("CREATE TABLE data.children (id int REFERENCES data.parents)")
+    result = dispatch(
+        personal_db.owner_id,
+        "query",
+        {
+            "database_id": str(personal_db.id),
+            "sql": "WITH p AS (INSERT INTO data.parents SELECT generate_series(1, $1) "
+            "RETURNING id), c AS (INSERT INTO data.children SELECT id FROM p "
+            "RETURNING id) SELECT id FROM c",
+            "parameters": [600],
+        },
+    )
+    assert len(result["rows"]) == 500
+    assert result["truncated"] is True
+    assert owner_conn.execute("SELECT count(*) FROM data.children").fetchone() == (600,)
+    assert owner_conn.execute("SELECT count(*) FROM data.parents").fetchone() == (600,)
+
+
+def test_writable_cte_rolls_back_on_response_limit(
+    personal_db, owner_conn, monkeypatch
+):
+    from opendb.databases import services
+
+    owner_conn.execute("CREATE TABLE data.parents (id int PRIMARY KEY)")
+    monkeypatch.setattr(services, "MAX_RESULT_BYTES", 80)
+    with pytest.raises(ValueError, match="response size limit"):
+        services.dispatch(
+            personal_db.owner_id,
+            "query",
+            {
+                "database_id": str(personal_db.id),
+                "sql": "WITH p AS (INSERT INTO data.parents VALUES (1) RETURNING id) "
+                "SELECT $1::text FROM p",
+                "parameters": ["x" * 100],
+            },
+        )
+    assert owner_conn.execute("SELECT count(*) FROM data.parents").fetchone() == (0,)
+
+
+def test_history_connection_failure_has_safe_actionable_diagnostic(
+    personal_db, monkeypatch
+):
+    import psycopg
+
+    from opendb.databases import services
+
+    def unavailable(*args):
+        msg = "password=private-secret host=private-host"
+        raise psycopg.OperationalError(msg)
+
+    monkeypatch.setattr(services, "privileged_connection", unavailable)
+    with pytest.raises(ValueError, match="database_") as error:
+        services.dispatch(
+            personal_db.owner_id,
+            "ingestion_history",
+            {
+                "database_id": str(personal_db.id),
+            },
+        )
+    message = str(error.value)
+    assert "ingestion_history" in message
+    assert "OperationalError" in message
+    assert "administrative" in message
+    assert "private-secret" not in message
+    assert "private-host" not in message
+
+
+def test_history_missing_table_has_distinct_diagnostic(personal_db, admin_conn):
+    from opendb.databases.services import dispatch
+
+    admin_conn.execute(
+        "ALTER TABLE opendb_catalog.ingestion_operations RENAME TO old_operations"
+    )
+    with pytest.raises(ValueError, match="database_") as error:
+        dispatch(
+            personal_db.owner_id,
+            "ingestion_history",
+            {
+                "database_id": str(personal_db.id),
+            },
+        )
+    assert "database_42P01" in str(error.value)
+    assert "table" in str(error.value)
+    assert "ingestion_history" in str(error.value)
+
+
+@pytest.mark.parametrize(
+    ("statement", "parameter", "expected"),
+    [
+        ("SELECT * FROM jsonb_array_elements($1::jsonb)", "[1, 2]", [[1], [2]]),
+        (
+            "SELECT * FROM jsonb_to_recordset($1::jsonb) AS t(id integer, title text)",
+            '[{"id": 1, "title": "hello"}]',
+            [[1, "hello"]],
+        ),
+        (
+            (
+                "SELECT md5(string_agg(value, '' ORDER BY value)) "
+                "FROM unnest($1::text[]) AS t(value)"
+            ),
+            ["c", "a", "b"],
+            [["900150983cd24fb0d6963f7d28e17f72"]],
+        ),
+    ],
+)
+def test_json_and_hash_queries_execute_with_parameters(
+    personal_db, statement, parameter, expected
+):
+    from opendb.databases.services import dispatch
+
+    result = dispatch(
+        personal_db.owner_id,
+        "query",
+        {
+            "database_id": str(personal_db.id),
+            "sql": statement,
+            "parameters": [parameter],
+        },
+    )
+    assert result["rows"] == expected
+
+
+def test_query_missing_relation_does_not_blame_catalog_installation(personal_db):
+    from opendb.databases.services import dispatch
+
+    with pytest.raises(ValueError, match="database_42P01") as error:
+        dispatch(
+            personal_db.owner_id,
+            "query",
+            {
+                "database_id": str(personal_db.id),
+                "sql": "SELECT * FROM data.missing_private_table",
+            },
+        )
+    message = str(error.value)
+    assert "current schema" in message
+    assert "installation" not in message
+    assert "missing_private_table" not in message

@@ -130,6 +130,7 @@ def create_mcp(*, auth_provider=None, actor_dependency=None, dispatcher=None):
         return await to_thread.run_sync(ingestion_guide, limiter=limiter)
 
     readonly = {
+        "ingestion_guide",
         "list_databases",
         "catalog",
         "list_access",

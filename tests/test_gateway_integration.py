@@ -284,3 +284,97 @@ def test_hybrid_weight_reaches_service_through_web_and_mcp(
 
     asyncio.run(exercise())
     assert all(item[:2] == (payload["index_id"], payload["query"]) for item in received)
+
+
+def test_desktop_probes_have_recoverable_errors_and_tool_guide_saves(personal_db):
+    from opendb.gateway.mcp import create_mcp
+
+    async def actor():
+        return personal_db.owner_id
+
+    async def exercise():
+        server = create_mcp(
+            auth_provider=StaticTokenVerifier(tokens={}),
+            actor_dependency=actor,
+        )
+        async with MCPClient(server) as client:
+            database = {"database_id": str(personal_db.id)}
+            base = {
+                "version": 1,
+                "idempotency_key": "probe-structure-0001",
+                "expected_schema_fingerprint": "0" * 64,
+                "source": {
+                    "name": "probe.txt",
+                    "media_type": "text/plain",
+                    "content": "probe",
+                },
+                "statements": [],
+                "records": [],
+                "annotations": [],
+            }
+            probes = [
+                ({}, "schema changed"),
+                (
+                    {
+                        "records": [
+                            {"ref": "m", "table": "meetings", "values": {"title": "x"}}
+                        ]
+                    },
+                    r"records\[0\].*returning",
+                ),
+                (
+                    {"records": [{"table": "meetings", "values": {"title": "x"}}]},
+                    r"records\[0\].*ref.*returning",
+                ),
+                (
+                    {
+                        "records": [
+                            {
+                                "schema": "data",
+                                "table": "meetings",
+                                "operation": "insert",
+                                "ref": "m",
+                                "data": {"title": "x"},
+                            }
+                        ]
+                    },
+                    r"records\[0\].*returning.*values",
+                ),
+                ({"statements": [{"sql": "select 1"}]}, r"statements\[0\].*string"),
+            ]
+            for index, (changes, expected) in enumerate(probes, 1):
+                operation = {
+                    **base,
+                    **changes,
+                    "idempotency_key": f"probe-structure-{index:04}",
+                }
+                with pytest.raises(ToolError, match=expected):
+                    await client.call_tool(
+                        "ingest", {"payload": {**database, "operation": operation}}
+                    )
+            history = await client.call_tool("ingestion_history", {"payload": database})
+            assert history.data["result"] == []
+
+            # A client can recover using only tools, then save once with provenance.
+            guide = await client.call_tool("ingestion_guide", {"payload": {}})
+            operation = guide.data["result"]["example_operation"]
+            catalog = await client.call_tool("catalog", {"payload": database})
+            operation["expected_schema_fingerprint"] = catalog.data["result"][
+                "fingerprint"
+            ]
+            payload = {**database, "operation": operation}
+            saved = await client.call_tool("ingest", {"payload": payload})
+            replay = await client.call_tool("ingest", {"payload": payload})
+            assert replay.data == saved.data
+            history = await client.call_tool("ingestion_history", {"payload": database})
+            assert len(history.data["result"]) == 1
+            operation_id = history.data["result"][0]["id"]
+            original = await client.call_tool(
+                "ingestion_history",
+                {
+                    "payload": {**database, "operation_id": operation_id},
+                },
+            )
+            assert original.data["result"]["source"] == operation["source"]
+
+    asyncio.run(exercise())

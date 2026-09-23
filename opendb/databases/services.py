@@ -3,6 +3,7 @@
 import base64
 import datetime
 import json
+import logging
 from contextlib import closing
 from uuid import UUID
 
@@ -26,6 +27,8 @@ from .sql_policy import validate_sql
 MAX_ROWS = 500
 MAX_RESULT_BYTES = 4 * 1024 * 1024
 SAVING_INSTRUCTIONS_MAX_LENGTH = 4000
+
+logger = logging.getLogger(__name__)
 
 
 class SQLJSONEncoder(DjangoJSONEncoder):
@@ -57,12 +60,50 @@ def dispatch(actor_id: int, action: str, payload: dict):
         raise DatabaseAccessDenied(msg) from exc
     except psycopg.Error as exc:
         # Do not echo DETAIL: constraint errors can contain complete private rows.
-        msg = f"database_{exc.sqlstate or 'unavailable'}: operation failed"
+        msg = _database_error_message(exc, action)
         raise ValueError(msg) from None
     except KeyError as exc:
         msg = "Required operation field is missing"
         raise ValueError(msg) from exc
     return _json_safe(result)
+
+
+def _database_error_message(exc, action):
+    # Driver/server text and DETAIL may contain credentials, SQL or private rows.
+    # Report only known categories and metadata, both publicly and in logs.
+    reasons = {
+        "42P01": "required table is missing",
+        "3F000": "required schema is missing",
+        "42703": "required column is missing",
+        "57014": "statement cancelled or timed out",
+        "55P03": "lock unavailable or lock timeout",
+        "0A000": "requested SQL feature is not supported by the database",
+        "28P01": "database authentication failed; check configured credentials",
+        "28000": "database authorization failed; check connection configuration",
+    }
+    reason = reasons.get(exc.sqlstate, "database operation failed")
+    if not exc.sqlstate and isinstance(exc, psycopg.OperationalError):
+        reason = "database connection or transport failed"
+        if action == "ingestion_history":
+            reason += (
+                "; check administrative connection configuration (OPENDB_ADMIN_DSN)"
+            )
+    if exc.sqlstate in {"42P01", "3F000", "42703"}:
+        reason += (
+            "; check database catalog installation/version"
+            if action == "ingestion_history"
+            else "; check the query against the current schema"
+        )
+    error_type = type(exc).__name__
+    logger.warning(
+        "Database action failed: action=%s sqlstate=%s error_type=%s",
+        action,
+        exc.sqlstate,
+        error_type,
+    )
+    return (
+        f"database_{exc.sqlstate or 'unavailable'}: {action}: {reason} ({error_type})"
+    )
 
 
 def _database_result(db, user):
@@ -98,6 +139,10 @@ def _clean_saving_instructions(value):
 
 
 def _dispatch(user, action, p):
+    if action == "ingestion_guide":
+        from opendb.gateway.ingestion_guide import ingestion_guide
+
+        return ingestion_guide()
     if action == "list_databases":
         dbs = PersonalDatabase.objects.filter(
             Q(owner=user) | Q(accessrole__roleassignment__email__iexact=user.email)
@@ -247,18 +292,33 @@ def _query(conn, payload, *, readonly):
         conn.execute("SET LOCAL work_mem = '4MB'")
         if not readonly:
             conn.execute("SELECT pg_advisory_xact_lock(%s)", (SCHEMA_LOCK_KEY,))
-        if kind == "SelectStmt":
+        if kind == "SelectStmt" and not _has_writes(node):
             with psycopg.RawServerCursor(conn, "opendb_result") as cursor:
                 cursor.execute(statement, params)
                 return _bounded_result(cursor, cursor.fetchmany(MAX_ROWS + 1))
         with psycopg.RawCursor(conn) as cursor:
-            if node.get("returningClause") or node.get("returningList"):
+            if (
+                kind == "SelectStmt"
+                or node.get("returningClause")
+                or node.get("returningList")
+            ):
                 # Consume all RETURNING rows to finish the mutation, buffering only
                 # the bounded response. Exceptions roll back the source mutation.
                 with closing(cursor.stream(statement, params)) as rows:
                     return _bounded_result(cursor, rows)
             cursor.execute(statement, params)
             return {"affected_rows": cursor.rowcount}
+
+
+def _has_writes(node):
+    """Detect data-modifying CTEs, which PostgreSQL cannot DECLARE a cursor over."""
+    if isinstance(node, list):
+        return any(_has_writes(child) for child in node)
+    if isinstance(node, dict):
+        return bool({"InsertStmt", "UpdateStmt", "DeleteStmt"} & node.keys()) or any(
+            _has_writes(child) for child in node.values()
+        )
+    return False
 
 
 def _bounded_result(cursor, source_rows):

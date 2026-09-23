@@ -14,7 +14,7 @@ Parent owns opendb/databases/**, shared settings/dependencies/Compose and integr
 - databases.services.dispatch(actor_id:int, action:str, payload:dict) -> JSON-safe result.
 Actions: list_databases, create_database, catalog, query, ingest, create_role,
  grant_object, assign_role, revoke_role, revoke_object, list_access, register_vector,
- search_vectors, vector_status, ingestion_history, saving_instructions.
+ search_vectors, vector_status, ingestion_history, saving_instructions, ingestion_guide.
 Owner-only saving_instructions {database_id} returns {database_id,instructions,max_length,
  updated_at}; web-only update_saving_instructions {database_id,instructions} normalizes
  line endings, trims and rejects non-text or more than 4000 characters.
@@ -26,7 +26,9 @@ sharing identifiers: role_id UUID, email, object_name (data schema only).
 vector register payload: database_id, table, key_column, text_column.
 search payload: database_id, index_id, query, limit=10, target_view?:name, filters?:{column:scalar}.
 Owner-only ingestion_history: database_id, operation_id?:UUID; source content returned only for a selected operation.
-SQL returns at most 500 rows / 4MiB; SELECT uses a server cursor, DML RETURNING streams.
+Authenticated ingestion_guide {} returns the canonical schema/example and query function allowlist.
+SQL returns at most 500 rows / 4MiB; read-only SELECT uses a server cursor;
+DML RETURNING and owner SELECTs containing writable CTEs stream and complete atomically.
 bytea serializes as {type:"bytea",base64:"..."}, temporal values as ISO strings, decimals as strings.
 Sharing services require control database autocommit and serialize changes with guest membership synchronization.
 Object grants retain PostgreSQL OIDs; list_access resolves actual current grants after renames.

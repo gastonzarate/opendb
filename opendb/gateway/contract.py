@@ -18,6 +18,12 @@ WEB_ONLY_ACTIONS = {
 }
 
 ACTIONS = {
+    "ingestion_guide": (
+        "Read the structured ingestion JSON Schema, semantic rules, linked-record "
+        "example and allowed query functions. Payload: {}. Call before ingest; "
+        "this tool provides the same guide as opendb://guides/ingestion "
+        "without requiring MCP resource support."
+    ),
     "ingestion_history": (
         "Inspect original sources and ingestion results as database "
         "owner. Payload: {database_id, operation_id?: UUID}. Without an "
@@ -50,15 +56,22 @@ ACTIONS = {
         "data saves with provenance and replay safety. Payload: {database_id, "
         "sql, parameters?: []}. Use $1, $2, etc. for parameter values. "
         "Owners may run permitted DDL/DML; guests can only read granted "
-        "objects. Results are bounded by the service."
+        "objects. Owners may use writable CTEs atomically. Results are bounded by "
+        "the service. Call ingestion_guide for query_policy.allowed_functions."
     ),
     "ingest": (
         "Apply one atomic structured ingestion. Payload: {database_id, "
-        "operation}. First read opendb://guides/ingestion for JSON Schema "
+        "operation}. First call ingestion_guide (payload: {}) or read "
+        "opendb://guides/ingestion for JSON Schema "
         "and a working example, then catalog for result.fingerprint. "
         "Operation requires version: 1, idempotency_key, "
         "expected_schema_fingerprint, source, statements, records, "
-        "annotations. Preserve unknown values instead of inventing them. "
+        "annotations. Each record requires ref, table, values, returning (e.g. "
+        '["id"]). Values are typed: {"title": {"type": "text", "value": "x"}}; '
+        'links use {"$ref": "earlier_ref.id"}. Refs and table/column names must '
+        "be unqualified identifiers (letters, digits, underscores; no colons). "
+        "statements is an array of SQL DDL strings, not {sql: ...} objects. "
+        "Preserve unknown values instead of inventing them. "
         "Eligible narrative and long text is indexed automatically in the "
         "background; no separate embedding request is needed."
     ),
@@ -151,10 +164,11 @@ Trust and scope:
   processed by the user's external assistant provider.
 
 Saving and modeling:
-- Read catalog and opendb://guides/ingestion before an ingestion. Reuse existing
-  entities, keys and conventions; model the actual domain rather than a fixed
-  template. Use ingest for ordinary document/domain-data saves, including their
-  schema changes, related records, source provenance and semantic annotations.
+- Read catalog and ingestion_guide (or opendb://guides/ingestion) before an
+  ingestion. Reuse existing entities, keys and conventions; model the actual
+  domain rather than a fixed template. Use ingest for ordinary document/domain-data
+  saves, including their schema changes, related records, source provenance and
+  semantic annotations.
 - The owner can write their own saving instructions in the OpenDB settings page:
   when to save, what to leave out, how to name and model things. list_databases
   returns them for owned databases as saving_instructions, and saving_instructions

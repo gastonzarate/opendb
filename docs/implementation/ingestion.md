@@ -287,3 +287,69 @@ constraints and units, then prepare the minimal operation consistent with that d
 Production uses the standard library, psycopg3 and the parent's existing pglast SQL
 parser/policy. JSON Schema verification in tests uses jsonschema, already present in
 the shared MCP environment. No dependencies or shared files are changed by this module.
+
+
+## Recovering from invalid MCP ingestion payloads
+
+MCP clients, including Claude Desktop, can call `ingestion_guide` with
+`{"payload": {}}` for the canonical JSON Schema, semantic rules and complete linked
+record example. The same content remains available at
+`opendb://guides/ingestion`. Resource access is no longer required to discover the
+contract. `ingest` also describes the essential record/value/reference format in
+its tool description.
+
+Validation retains the `invalid_operation` code and now includes the field path
+and expected format, without echoing submitted values or SQL. For example:
+
+```text
+Invalid structured ingestion operation. records[0]: missing required keys: returning.
+Invalid structured ingestion operation. statements[0]: expected a string of at most 100000 characters without NUL.
+```
+
+A record like `{"ref":"m","table":"meetings","values":{"title":"x"}}`
+is invalid: it needs `returning` and typed values. Its valid structural form is:
+
+```json
+{
+  "ref": "meeting",
+  "table": "meetings",
+  "values": {"title": {"type": "text", "value": "x"}},
+  "returning": ["id"]
+}
+```
+
+A later record can use `{"$ref":"meeting.id"}` for its foreign key. Ref labels
+must be identifiers such as `person_tomas_recalt`; colons and hyphens are invalid.
+`statements` contains SQL DDL strings, never `{"sql": ...}` objects. This example
+assumes the destination table exists with compatible columns; all normal schema,
+constraint, fingerprint and authorization checks still apply.
+
+`ingestion_history` reads through the administrative connection after owner
+verification, while `query` and `catalog` use the restricted caller connection.
+Success of the latter two does not prove the administrative connection works.
+Database failures now report the action, SQLSTATE when available, driver exception
+class, and a safe category (missing table/schema/column, timeout, authentication,
+or connection/transport failure). History connection failures point to
+`OPENDB_ADMIN_DSN`; missing history relations point to catalog installation.
+Logs record action, SQLSTATE and exception class, never raw driver diagnostics,
+SQL, credentials or source text. An error without a SQLSTATE still cannot identify
+the exact network/TLS/credential cause by itself; check the deployment connection
+configuration. No production cause was established by the local reproduction.
+
+## Query functions and atomic CTEs
+
+The authoritative function allowlist is `opendb.databases.sql_policy.FUNCTIONS`.
+Clients can retrieve its sorted current contents from
+the `ingestion_guide` tool response at `result.query_policy.allowed_functions`. Unsupported calls name the rejected
+function; schema-qualified calls remain rejected. The allowlist includes
+`jsonb_array_elements`, `jsonb_to_recordset` and `md5`, as well as the already
+supported `string_agg` and `unnest`. The JSON functions expand supplied JSON into
+rows ([PostgreSQL JSON functions](https://www.postgresql.org/docs/17/functions-json.html)).
+All existing relation, type, role and resource restrictions remain enforced.
+
+Owner queries with data-modifying CTEs use a streaming cursor rather than a
+server-side `DECLARE` cursor. They execute in one transaction, drain all mutation
+results even when the public response is truncated at 500 rows, and roll back when
+the response exceeds the byte limit. Ordinary read-only SELECTs keep their server
+cursor. Guests cannot use writable CTEs. Ordinary document saves should still use
+`ingest` for source provenance and idempotency.

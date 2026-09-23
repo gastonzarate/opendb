@@ -247,3 +247,96 @@ def test_source_content_reference_is_strict_and_in_public_schema():
         with pytest.raises(IngestionError):
             validate_operation(invalid_data)
         assert list(Draft202012Validator(operation_schema()).iter_errors(invalid_data))
+
+
+@pytest.mark.parametrize(
+    ("records", "path", "reason"),
+    [
+        (
+            [{"ref": "m", "table": "meetings", "values": {"title": "x"}}],
+            "records[0]",
+            "returning",
+        ),
+        (
+            [
+                {
+                    "ref": "m",
+                    "table": "meetings",
+                    "values": {"title": "private text"},
+                    "returning": ["id"],
+                }
+            ],
+            "records[0].values.title",
+            "type",
+        ),
+        (
+            [
+                {
+                    "ref": "m",
+                    "table": "meetings",
+                    "values": {"parent_id": {"$ref": "m"}},
+                    "returning": ["id"],
+                }
+            ],
+            "records[0].values.parent_id",
+            "ref.column",
+        ),
+        (
+            [
+                {
+                    "ref": "person:tomas",
+                    "table": "people",
+                    "values": {},
+                    "returning": ["id"],
+                }
+            ],
+            "records[0].ref",
+            "identifier",
+        ),
+        (
+            [
+                {
+                    "ref": "m",
+                    "table": "meetings",
+                    "values": {},
+                    "returning": ["id"],
+                    "schema": "data",
+                }
+            ],
+            "records[0]",
+            "schema",
+        ),
+    ],
+)
+def test_reported_record_errors_identify_path_and_expected_contract(
+    records, path, reason
+):
+    data = operation()
+    data["records"] = records
+    with pytest.raises(IngestionError) as error:
+        validate_operation(data)
+    assert error.value.code == "invalid_operation"
+    assert path in str(error.value)
+    assert reason in str(error.value)
+    assert "private text" not in str(error.value)
+
+
+def test_statement_objects_explain_that_sql_strings_are_expected():
+    data = operation()
+    data["statements"] = [{"sql": "select private_text"}]
+    with pytest.raises(IngestionError) as error:
+        validate_operation(data)
+    assert "statements[0]" in str(error.value)
+    assert "string" in str(error.value)
+    assert "private_text" not in str(error.value)
+
+
+def test_nested_typed_value_error_does_not_echo_source_or_value():
+    data = operation()
+    data["records"][0]["values"]["amount"] = {"type": "numeric", "value": "secret"}
+    with pytest.raises(IngestionError) as error:
+        validate_operation(data)
+    assert "records[0].values.amount.value" in str(error.value)
+    assert "numeric" in str(error.value)
+    assert "secret" not in str(error.value)
+    assert "Coffee" not in str(error.value)
