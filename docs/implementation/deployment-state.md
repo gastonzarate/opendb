@@ -144,6 +144,13 @@ Cambio aplicado:
   además recibió `GRANT odb_owner_* ... WITH INHERIT TRUE, SET TRUE`, igual que
   hace el aprovisionador con cada base nueva. `opendb_admin` es miembro de
   `opendb_provisioner` y conserva su rotación como acceso de emergencia.
+- Dentro de cada base personal, el esquema `opendb_catalog`, sus tablas y sus
+  funciones eran propiedad de `opendb_admin`, así que `upgrade_catalog` (que corre
+  en cada arranque del web) fallaba con el nuevo rol y el contenedor entraba en
+  bucle de reinicio. Se ejecutó `REASSIGN OWNED BY opendb_admin TO
+  opendb_provisioner` conectado a cada base como `opendb_admin`. Al cambiar el rol
+  administrativo hay que hacer las dos cosas: `ALTER DATABASE ... OWNER` y
+  `REASSIGN OWNED` en cada base.
 - Validado en producción con el nuevo DSN antes de cambiar el entorno:
   `list_access`, `ingestion_history`, aprovisionamiento y borrado de una base
   sintética (usuario y tombstone eliminados) y una pasada del worker sin errores.
