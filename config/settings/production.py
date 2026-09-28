@@ -136,6 +136,10 @@ LOGGING = {
     },
     "root": {"level": "INFO", "handlers": ["console"]},
     "loggers": {
+        # httpx logs every request line at INFO, including Google tokeninfo
+        # URLs that carry the bearer access token as a query parameter.
+        "httpx": {"level": "WARNING"},
+        "httpcore": {"level": "WARNING"},
         "django.request": {
             "handlers": ["mail_admins"],
             "level": "ERROR",

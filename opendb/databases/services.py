@@ -68,6 +68,24 @@ def dispatch(actor_id: int, action: str, payload: dict):
     return _json_safe(result)
 
 
+# Actions served through the administrative connection (OPENDB_ADMIN_DSN) rather
+# than the owner's derived credentials. A stale administrative password breaks
+# exactly these while query/ingest keep working, so the hint must name the DSN.
+ADMIN_CONNECTION_ACTIONS = frozenset(
+    {
+        "ingestion_history",
+        "register_vector",
+        "create_role",
+        "update_role",
+        "grant_object",
+        "revoke_object",
+        "assign_role",
+        "revoke_role",
+        "list_access",
+    }
+)
+
+
 def _database_error_message(exc, action):
     # Driver/server text and DETAIL may contain credentials, SQL or private rows.
     # Report only known categories and metadata, both publicly and in logs.
@@ -84,10 +102,11 @@ def _database_error_message(exc, action):
     reason = reasons.get(exc.sqlstate, "database operation failed")
     if not exc.sqlstate and isinstance(exc, psycopg.OperationalError):
         reason = "database connection or transport failed"
-        if action == "ingestion_history":
-            reason += (
-                "; check administrative connection configuration (OPENDB_ADMIN_DSN)"
-            )
+    if action in ADMIN_CONNECTION_ACTIONS and (
+        exc.sqlstate in {"28P01", "28000"}
+        or (not exc.sqlstate and isinstance(exc, psycopg.OperationalError))
+    ):
+        reason += "; check administrative connection configuration (OPENDB_ADMIN_DSN)"
     if exc.sqlstate in {"42P01", "3F000", "42703"}:
         reason += (
             "; check database catalog installation/version"

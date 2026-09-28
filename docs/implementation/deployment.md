@@ -70,11 +70,12 @@ and URI-encoded credentials; PostgreSQL keywords are also accepted for admin DSN
 | `OPENDB_DOMAIN` | Required single DNS hostname, no scheme/path/port. Drives allowed Host, HTTPS CSRF origin, MCP public origin and health Host. |
 | `DJANGO_SECRET_KEY` | Required strong persistent Django secret. |
 | `DATABASE_URL` | Required control-role PostgreSQL URL for the precreated OpenDB control database; this role owns migrations, not personal database administration. |
-| `OPENDB_ADMIN_DSN` | Required separate administrative role/database DSN used for personal provisioning; must differ from the control role. |
+| `OPENDB_ADMIN_DSN` | Required separate administrative role/database DSN used for personal provisioning; must differ from the control role. Use a dedicated role with a stable password (production: `opendb_provisioner`, member of `rds_superuser`), never the RDS master user while Secrets Manager rotates its password: every administrative action fails silently after the first rotation. |
 | `OPENDB_DB_CREDENTIAL_KEY` | Required stable random secret of at least 32 characters. Used to derive per-user role passwords; rotation needs a credential migration. |
 | `OPENDB_GOOGLE_CLIENT_ID`, `OPENDB_GOOGLE_CLIENT_SECRET` | Required Google OAuth web client credentials. |
 | `OPENDB_MCP_JWT_SIGNING_KEY` | Required stable random signing secret of at least 32 characters. |
-| `OPENDB_MCP_STORAGE_ENCRYPTION_KEY` | Required stable Fernet key (URL-safe base64 of 32 random bytes). Back up with MCP state; losing it makes state unreadable. |
+| `OPENDB_MCP_STORAGE_ENCRYPTION_KEY` | Required stable Fernet key (URL-safe base64 of 32 random bytes). Back up with the control database; losing it makes OAuth state unreadable. |
+| `OPENDB_MCP_OAUTH_DSN` | Required control database DSN for shared OAuth state (client registrations, tokens, codes). Same role/target as `DATABASE_URL`; `sslmode`/`sslrootcert` are appended automatically. Making this shared (instead of a per-replica local directory) is what lets MCP run more than one replica. |
 | `OPENDB_MCP_ALLOWED_CLIENT_REDIRECT_URIS` | Required comma-separated client callback allowlist. Select approved clients; localhost wildcard callbacks are supported by existing app validation. Hosted Claude surfaces (claude.ai web, Desktop, mobile, Cowork) additionally need the exact `https://claude.ai/api/mcp/auth_callback`, otherwise their dynamic registration fails with `invalid_redirect_uri`. |
 | `OPENDB_MODEL_URL` | Private presigned direct HTTPS URL required on first model initialization or invalid/missing cache. May be empty once the valid named volume exists. Supply through Dokploy, never a build argument or command line. Main agent supplies it independently. |
 | `OPENDB_IMAGE` | Optional local image tag, default `opendb-dokploy:local`; use a unique release tag when building. All app services reuse it with `pull_policy: never`. |

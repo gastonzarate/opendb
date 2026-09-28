@@ -45,12 +45,28 @@ def run_once(database_id=None, limit=10):
                 summary.update(process_pending(conn, limit=limit))
                 if summary["discovery_failed"] or summary["failed"]:
                     exit_code = 1
-        except Exception:  # noqa: BLE001 - isolate unavailable personal databases.
+        except Exception as exc:  # noqa: BLE001 - isolate unavailable personal databases.
+            # Only the exception class: driver messages may carry credentials or rows.
             summary["error_code"] = "database_processing_failed"
+            summary["error_type"] = type(exc).__name__
             exit_code = 1
         sys.stdout.write(json.dumps(summary) + "\n")
         sys.stdout.flush()
     return exit_code
+
+
+MAX_BACKOFF_SECONDS = 300
+
+
+def backoff(poll_interval, failures):
+    """Poll normally while healthy; slow down exponentially while passes fail.
+
+    An unreachable administrative connection otherwise produces a tight loop of
+    identical failures (hundreds of thousands of log lines per week).
+    """
+    if failures <= 0:
+        return poll_interval
+    return min(poll_interval * 2**failures, MAX_BACKOFF_SECONDS)
 
 
 def main(argv=None):
@@ -86,11 +102,13 @@ def main(argv=None):
 
     django.setup()
     try:
+        failures = 0
         while True:
             result = run_once(args.database_id, args.limit)
             if args.once:
                 return result
-            time.sleep(args.poll_interval)
+            failures = failures + 1 if result else 0
+            time.sleep(backoff(args.poll_interval, failures))
     except KeyboardInterrupt:
         return 0
 

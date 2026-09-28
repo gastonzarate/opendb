@@ -120,3 +120,40 @@ Validación con metadata descriptiva: 444 pruebas backend pasaron, 1 omitida;
 Build, formatter, pre-commit, smoke ASGI/HTML/JS, permisos no-root, aislamiento de
 Compose y checksum/redacción del modelo pasaron. ARM64 y embeddings reales se
 verificaron en producción. El login Google público aún no se verificó.
+
+## 2026-09-28: rol administrativo estable (incidente de rotación de contraseña)
+
+Síntoma: desde el 21 de septiembre fallaban con `OperationalError` todas las
+acciones servidas por la conexión administrativa (`list_access`, `create_role` y
+el resto de permisos, `register_vector`, `ingestion_history`, el aprovisionamiento
+de bases nuevas y el worker de embeddings), mientras `query` e `ingest` seguían
+funcionando con las credenciales derivadas del dueño.
+
+Causa: `OPENDB_ADMIN_DSN` usaba el usuario maestro `opendb_admin`, cuya contraseña
+administra Secrets Manager con rotación automática cada 7 días (rotaciones el
+21 y el 28 de septiembre). El entorno de Dokploy conservaba la contraseña del
+despliegue inicial.
+
+Cambio aplicado:
+
+- Rol `opendb_provisioner` (LOGIN, CREATEDB, CREATEROLE, miembro de
+  `rds_superuser` porque `vector` no es extensión de confianza en RDS) con
+  contraseña estable generada localmente. Es el nuevo usuario de
+  `OPENDB_ADMIN_DSN` en Dokploy y en `.envs/.production/dokploy.env`.
+- Las cinco bases personales pasaron a ser propiedad de `opendb_provisioner`, que
+  además recibió `GRANT odb_owner_* ... WITH INHERIT TRUE, SET TRUE`, igual que
+  hace el aprovisionador con cada base nueva. `opendb_admin` es miembro de
+  `opendb_provisioner` y conserva su rotación como acceso de emergencia.
+- Validado en producción con el nuevo DSN antes de cambiar el entorno:
+  `list_access`, `ingestion_history`, aprovisionamiento y borrado de una base
+  sintética (usuario y tombstone eliminados) y una pasada del worker sin errores.
+- Código: la pista `OPENDB_ADMIN_DSN` en los errores cubre todas las acciones
+  administrativas y también los fallos de autenticación; el worker registra el
+  tipo de excepción y aplica backoff exponencial (máximo 300 s) tras pasadas
+  fallidas; los loggers `httpx`/`httpcore` quedan en WARNING porque registraban
+  las URL de tokeninfo de Google con el access token.
+
+Regla: `OPENDB_ADMIN_DSN` nunca debe apuntar a un rol cuya contraseña rote fuera
+del despliegue. Si se rota `opendb_provisioner`, actualizar el entorno de Dokploy
+y redesplegar en la misma operación. Copia previa del entorno de Dokploy:
+`/home/ubuntu/.opendb-compose-env-backup-<timestamp>` en el host (0600).
