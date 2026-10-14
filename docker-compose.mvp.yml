@@ -10,7 +10,7 @@ x-opendb-env: &opendb-env
 
 services:
   frontend-build:
-    image: node:24-bookworm-slim
+    image: node:25-bookworm-slim
     working_dir: /workspace/frontend
     user: "1000:1000"
     environment:
