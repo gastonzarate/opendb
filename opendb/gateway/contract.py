@@ -57,7 +57,9 @@ ACTIONS = {
         "sql, parameters?: []}. Use $1, $2, etc. for parameter values. "
         "Owners may run permitted DDL/DML; guests can only read granted "
         "objects. Owners may use writable CTEs atomically. Results are bounded by "
-        "the service. Call ingestion_guide for query_policy.allowed_functions."
+        "the service. Functions are allowed except the unsafe ones in "
+        "ingestion_guide query_policy.blocked_functions. Cast untyped "
+        "parameters (e.g. $1::integer)."
     ),
     "ingest": (
         "Apply one atomic structured ingestion. Payload: {database_id, "

@@ -40,7 +40,8 @@ async def test_tool_only_client_can_discover_and_validate_ingestion_format():
         validate_operation(guide["example_operation"])
         resource = await client.read_resource("opendb://guides/ingestion")
         assert guide == json.loads(resource[0].text)
-        assert "jsonb_to_recordset" in guide["query_policy"]["allowed_functions"]
+        assert "set_config" in guide["query_policy"]["blocked_functions"]
+        assert "pg_" in guide["query_policy"]["blocked_function_prefixes"]
         assert "ingestion_guide" in tools["ingest"].description
 
 

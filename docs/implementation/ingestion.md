@@ -338,13 +338,27 @@ configuration. No production cause was established by the local reproduction.
 
 ## Query functions and atomic CTEs
 
-The authoritative function allowlist is `opendb.databases.sql_policy.FUNCTIONS`.
-Clients can retrieve its sorted current contents from
-the `ingestion_guide` tool response at `result.query_policy.allowed_functions`. Unsupported calls name the rejected
-function; schema-qualified calls remain rejected. The allowlist includes
-`jsonb_array_elements`, `jsonb_to_recordset` and `md5`, as well as the already
-supported `string_agg` and `unnest`. The JSON functions expand supplied JSON into
-rows ([PostgreSQL JSON functions](https://www.postgresql.org/docs/17/functions-json.html)).
+Functions follow a blocklist: every PostgreSQL function is accepted except
+`opendb.databases.sql_policy.BLOCKED_FUNCTIONS` and names starting with
+`BLOCKED_FUNCTION_PREFIXES` or matching `BLOCKED_FUNCTION_PATTERN`. Clients read them
+from the `ingestion_guide` tool at `result.query_policy.blocked_functions`,
+`blocked_function_prefixes` and `blocked_function_pattern`. Blocked
+are functions that act outside the caller's own rows: they run SQL given as text
+(`query_to_xml`, `ts_stat`, `crosstab`...; the inner statement would skip this
+parser), change session settings (`set_config` could lift the 5 s
+`statement_timeout`), stall or signal sessions and hold locks (`pg_sleep`,
+`pg_terminate_backend`, `pg_advisory_lock`), use sequences (`nextval`, `setval`),
+files, large objects or other servers (`pg_read_file`, `lo_import`, `dblink`), or
+probe the shared catalog (`to_regrole`, `has_database_privilege`, and the reg*
+type I/O and ACL functions: `regroleout(10)` or `acldefault('r', 10)` turn a plain
+number into a cluster-wide role name, the leak the type rule blocks for `::regrole`)
+([PostgreSQL administration functions](https://www.postgresql.org/docs/17/functions-admin.html),
+[XML mapping](https://www.postgresql.org/docs/17/functions-xml.html#FUNCTIONS-XML-MAPPING)).
+Unsupported calls name the rejected function. Unqualified names and
+`pg_catalog.<name>` are accepted; PostgreSQL itself produces the latter for
+SQL-syntax forms such as `extract(year FROM x)` and `position('a' IN x)`. Any other
+schema qualification is rejected. Grants, the relation and type rules and the
+statement timeout keep applying to every accepted function.
 All existing relation, type, role and resource restrictions remain enforced.
 
 Owner queries with data-modifying CTEs use a streaming cursor rather than a

@@ -4,7 +4,9 @@
 def ingestion_guide():
     """Load the canonical schema/example at request time, alongside DBA guidance."""
     # Lazy import keeps gateway startup independent of peer initialization.
-    from opendb.databases.sql_policy import FUNCTIONS  # noqa: PLC0415
+    from opendb.databases.sql_policy import BLOCKED_FUNCTION_PATTERN  # noqa: PLC0415
+    from opendb.databases.sql_policy import BLOCKED_FUNCTION_PREFIXES  # noqa: PLC0415
+    from opendb.databases.sql_policy import BLOCKED_FUNCTIONS  # noqa: PLC0415
     from opendb.ingestion import example_operation  # noqa: PLC0415
     from opendb.ingestion import operation_schema  # noqa: PLC0415
     from opendb.vectors.discovery import configuration  # noqa: PLC0415
@@ -13,9 +15,23 @@ def ingestion_guide():
 
     return {
         "query_policy": {
-            "allowed_functions": sorted(FUNCTIONS),
+            "functions": (
+                "PostgreSQL functions are allowed except blocked_functions and "
+                "names starting with blocked_function_prefixes or matching "
+                "blocked_function_pattern: functions that run "
+                "SQL given as text, change settings, stall or signal sessions, hold "
+                "locks, use sequences, files or other servers, or probe the catalog."
+            ),
+            "blocked_functions": sorted(BLOCKED_FUNCTIONS),
+            "blocked_function_prefixes": list(BLOCKED_FUNCTION_PREFIXES),
+            "blocked_function_pattern": BLOCKED_FUNCTION_PATTERN.pattern,
             "function_names": (
-                "Use unqualified function names; qualified calls are rejected."
+                "Use unqualified function names (pg_catalog.<name> is accepted); "
+                "other schema-qualified calls are rejected."
+            ),
+            "parameters": (
+                "Cast parameters whose type PostgreSQL cannot infer, "
+                "e.g. $1::integer, $2::jsonb, $3::timestamptz."
             ),
             "writable_ctes": "Owner only; one statement executes atomically.",
             "ingestion_statements": (

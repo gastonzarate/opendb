@@ -224,3 +224,67 @@ def test_writable_ctes_remain_forbidden_for_readonly_callers(mutation):
     statement = f"WITH m AS ({mutation}) SELECT * FROM m"  # noqa: S608 -- Static fixtures.
     with pytest.raises(ValueError, match="Nested statement is not supported"):
         validate_sql(statement, readonly=True)
+
+
+@pytest.mark.parametrize("readonly", [True, False])
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "SELECT left(usuario, 3), position('a' IN usuario) FROM data.cuentas",
+        "SELECT extract(year FROM now()), date_part('year', now())",
+        "SELECT jsonb_array_elements_text($1::jsonb)",
+        "SELECT jsonb_set($1::jsonb, '{a}', '1'::jsonb)",
+        "SELECT split_part($1::text, ',', 1), regexp_replace($1::text, 'a', 'b')",
+        "SELECT pg_catalog.lower('A')",
+        "SELECT format('%s-%s', 1, 2), to_jsonb(1), array_length(ARRAY[1], 1)",
+        "SELECT regexp_replace($1::text, 'a', 'b'), regexp_matches($1::text, 'a')",
+        "SELECT regr_slope(y, x) FROM data.points",
+    ],
+)
+def test_ordinary_functions_are_allowed(statement, readonly):
+    from opendb.databases.sql_policy import validate_sql
+
+    validate_sql(statement, readonly=readonly)
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "SELECT query_to_xml('select 1', true, false, '')",
+        "SELECT ts_stat('select 1')",
+        "SELECT set_config('statement_timeout', '0', true)",
+        "SELECT current_setting('statement_timeout')",
+        "SELECT pg_sleep(10)",
+        "SELECT pg_catalog.pg_sleep(10)",
+        "SELECT pg_terminate_backend(1)",
+        "SELECT pg_advisory_lock(1)",
+        "SELECT nextval('data.s')",
+        "SELECT setval('data.s', 1)",
+        "SELECT lo_import('/etc/passwd')",
+        "SELECT loread(1, 1)",
+        "SELECT dblink('host=x', 'select 1')",
+        "SELECT to_regrole('postgres')",
+        "SELECT has_database_privilege('postgres', 'CONNECT')",
+        "SELECT txid_current()",
+        "SELECT PG_SLEEP(1)",
+        "SELECT public.md5('x')",
+        "SELECT data.evil()",
+        "SELECT a.b.c('x')",
+        "SELECT * FROM data.t WHERE id = (SELECT nextval('data.s'))",
+        "SELECT regroleout(10)",
+        "SELECT regrolein('postgres')",
+        "SELECT regclass('pg_authid')",
+        "SELECT regnamespaceout(11)",
+        "SELECT makeaclitem(10, 10, 'SELECT', false)",
+        "SELECT acldefault('r', 10)",
+        "SELECT aclexplode(NULL)",
+        "SELECT fmgr_sql_validator(1)",
+        "SELECT format_type(16, NULL)",
+        "SELECT row_security_active('data.t')",
+    ],
+)
+def test_unsafe_functions_stay_blocked(statement):
+    from opendb.databases.sql_policy import validate_sql
+
+    with pytest.raises(ValueError, match="Function is not supported"):
+        validate_sql(statement)

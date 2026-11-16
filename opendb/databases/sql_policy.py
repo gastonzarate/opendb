@@ -1,6 +1,7 @@
 """Conservative PostgreSQL AST policy; grants remain the authorization boundary."""
 
 import json
+import re
 
 from pglast import ast
 from pglast import parse_sql
@@ -22,60 +23,96 @@ WRITE = {
     "RenameStmt",
     "TruncateStmt",
 }
-FUNCTIONS = {
-    "sum",
-    "avg",
-    "min",
-    "max",
-    "count",
-    "abs",
-    "round",
-    "ceil",
-    "floor",
-    "lower",
-    "upper",
-    "length",
-    "char_length",
-    "trim",
-    "btrim",
-    "ltrim",
-    "rtrim",
-    "replace",
-    "substring",
-    "concat",
-    "concat_ws",
-    "coalesce",
-    "nullif",
-    "greatest",
-    "least",
-    "now",
-    "date_trunc",
-    "date_part",
-    "extract",
-    "to_char",
-    "to_date",
-    "to_timestamp",
-    "json_build_object",
-    "jsonb_build_object",
-    "jsonb_array_elements",
-    "jsonb_to_recordset",
-    "md5",
-    "json_agg",
-    "jsonb_agg",
-    "array_agg",
-    "string_agg",
-    "row_number",
-    "rank",
-    "dense_rank",
-    "lag",
-    "lead",
-    "first_value",
-    "last_value",
-    "bool_and",
-    "bool_or",
-    "generate_series",
-    "unnest",
+# Functions are allowed unless they can act outside the caller's own rows:
+# run SQL passed as text (escaping this parser), change session settings
+# (statement_timeout is the resource limit), stall or signal backends, hold
+# locks, touch sequences, files, large objects or other servers, or probe the
+# shared catalog (other tenants' roles and databases). Grants, the relation and
+# type rules below and the statement timeout still apply to everything else.
+BLOCKED_FUNCTION_PREFIXES = (
+    "pg_",  # administration, files, sleep, locks, signals, catalog and stats
+    "lo_",  # server-side large objects (lo_import/lo_export read/write files)
+    "dblink",  # connections to other servers
+    "to_reg",  # catalog probes: to_regrole, to_regclass, to_regnamespace...
+    "has_",  # catalog probes: has_database_privilege, has_table_privilege...
+    "txid_",  # transaction ids and snapshots
+    "binary_upgrade_",
+    "acl",  # acldefault/aclexplode turn role OIDs into cluster-wide role names
+)
+# Input/output functions of the reg* catalog types: regroleout(10) or
+# regrolein('name') map OIDs and names of cluster-wide roles, the same leak the
+# type rule blocks for ::regrole casts. Also function/FDW validators.
+BLOCKED_FUNCTION_PATTERN = re.compile(
+    r"reg(class|collation|config|dictionary|namespace|oper|operator|proc"
+    r"|procedure|role|type)(in|out|recv|send)?|.*_validator"
+)
+BLOCKED_FUNCTIONS = {
+    # Run SQL given as text: the statement inside is never validated here.
+    "query_to_xml",
+    "query_to_xmlschema",
+    "query_to_xml_and_xmlschema",
+    "cursor_to_xml",
+    "cursor_to_xmlschema",
+    "table_to_xml",
+    "table_to_xmlschema",
+    "table_to_xml_and_xmlschema",
+    "schema_to_xml",
+    "schema_to_xmlschema",
+    "schema_to_xml_and_xmlschema",
+    "database_to_xml",
+    "database_to_xmlschema",
+    "database_to_xml_and_xmlschema",
+    "ts_stat",
+    "ts_rewrite",
+    "crosstab",
+    "crosstab2",
+    "crosstab3",
+    "crosstab4",
+    "connectby",
+    # Session settings: set_config can lift statement_timeout.
+    "set_config",
+    "current_setting",
+    # Sequences: side effects even inside a SELECT.
+    "nextval",
+    "setval",
+    "currval",
+    "lastval",
+    # Large objects without the lo_ prefix.
+    "loread",
+    "lowrite",
+    # Catalog probes without the prefixes above.
+    "obj_description",
+    "col_description",
+    "shobj_description",
+    "inet_server_addr",
+    "inet_server_port",
+    "inet_client_addr",
+    "inet_client_port",
+    "makeaclitem",
+    "hash_aclitem",
+    "hash_aclitem_extended",
+    "format_type",
+    "row_security_active",
+    "satisfies_hash_partition",
+    "amvalidate",
+    "currtid2",
+    # Index maintenance.
+    "brin_summarize_new_values",
+    "brin_summarize_range",
+    "brin_desummarize_range",
+    "gin_clean_pending_list",
 }
+
+
+def blocked_function(name: str) -> bool:
+    name = name.lower()
+    return (
+        name in BLOCKED_FUNCTIONS
+        or name.startswith(BLOCKED_FUNCTION_PREFIXES)
+        or BLOCKED_FUNCTION_PATTERN.fullmatch(name) is not None
+    )
+
+
 TYPES = {
     "int2",
     "int4",
@@ -211,11 +248,20 @@ def validate_sql(statement: str, *, readonly: bool = False) -> None:
                     raise ValueError(msg)
                 if kind == "FuncCall":
                     names = _strings(value["funcname"])
-                    if len(names) != 1 or names[0].lower() not in FUNCTIONS:
+                    # PostgreSQL parses SQL-syntax forms such as
+                    # extract(year FROM x) or position('a' IN x) as
+                    # pg_catalog.<name>; any other schema is rejected.
+                    in_catalog = (
+                        len(names) == QUALIFIED_NAME_PARTS
+                        and names[0].lower() == "pg_catalog"
+                    )
+                    if not (len(names) == 1 or in_catalog) or blocked_function(
+                        names[-1]
+                    ):
                         name = ".".join(names)
                         msg = (
                             f"Function is not supported: {name!r}. "
-                            "See ingestion_guide.query_policy.allowed_functions"
+                            "See ingestion_guide.query_policy.blocked_functions"
                         )
                         raise ValueError(msg)
                 if kind == "TypeName":
